@@ -482,6 +482,7 @@ FriendListScanner.prototype.collectTargetFriend = function (obj) {
     } catch (e) { errorInfo("[" + obj.name + "]获取收集前能量异常" + e) }
     if (_config.help_friend) {
       rentery = this.collectAndHelp(obj.isHelp)
+      obj.renteryCount ++
     } else {
       this.collectEnergy()
     }
@@ -550,7 +551,12 @@ FriendListScanner.prototype.collectTargetFriend = function (obj) {
         return false
       }
     }
-    if (rentery) {
+    if (rentery && obj.renteryCount < 6) {
+      // 满足重试条件（在BaseScanner里有条件）， 且重试次数小于6. （防止有好友送的能量球不能收取，卡循环）
+      if (obj.renteryCount > 1) {
+        toastLog('可能遇到无法收取的能量球，重试5次后跳过，当前第:' + obj.renteryCount + '次')
+      }
+      
       obj.isHelp = false
       return this.collectTargetFriend(obj)
     }
@@ -561,7 +567,9 @@ FriendListScanner.prototype.collectTargetFriend = function (obj) {
 // 根据可收取列表收取好友
 FriendListScanner.prototype.collectAvailableList = function () {
   while (this.avil_list.length) {
-    if (false === this.collectTargetFriend(this.avil_list.shift())) {
+    let obj = this.avil_list.shift()
+    obj.renteryCount = 0
+    if (false === this.collectTargetFriend(obj)) {
       warnInfo('收取目标好友失败，向上抛出')
       return false
     }
