@@ -100,6 +100,7 @@ const BaseScanner = function () {
     if (energyBalls && energyBalls.length > 0) {
       let length = energyBalls.length
       let helped = false
+      // 帮收的文字颜色 和 好友赠送的颜色相同
       let colors = _config.helpBallColors || ['#f99236', '#f7af70']
       let that = this
       energyBalls.forEach(function (energy_ball) {

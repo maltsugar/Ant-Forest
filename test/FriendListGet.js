@@ -154,6 +154,8 @@ function debugInfo (content, isToast) {
   console.verbose(c)
 }
 
+
+// 好友列表是否可操作
 function isObtainable (obj, screen) {
   let container = {
     fri: obj,
@@ -225,7 +227,7 @@ function isObtainable (obj, screen) {
         container.canDo = true
       } else if (
         config.help_friend &&
-        // 是否可帮收取
+        // 是否可帮收取，列表可帮助收取的爱心背景颜色
         images.findColor(screen, config.can_help_color || '#f99236', {
           region: [o_x, o_y, o_w, o_h],
           threshold: threshold

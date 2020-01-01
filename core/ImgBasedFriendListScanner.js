@@ -403,13 +403,14 @@ const ImgBasedFriendListScanner = function () {
           let noError = true
           collectOrHelpList.forEach(point => {
             if (noError) {
+              point.renteryCount = 0 // 重置该点（该好友），已经重复进入的次数
               if (false === that.collectTargetFriend(point)) {
                 noError = false
               }
             }
           })
           if (!noError) {
-            // true is error
+            // noError 为true 时 表示有错误
             return true
           }
         } else {
@@ -605,6 +606,7 @@ ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
     } catch (e) { errorInfo("[" + obj.name + "]获取收集前能量异常" + e) }
     if (_config.help_friend) {
       rentery = this.collectAndHelp(obj.isHelp)
+      obj.renteryCount ++
     } else {
       this.collectEnergy()
     }
@@ -662,7 +664,8 @@ ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
     if (false === this.returnToListAndCheck()) {
       return false
     }
-    if (rentery) {
+    if (rentery && obj.renteryCount < 6) {
+      // 满足重试条件（在BaseScanner里有条件）， 且重试次数小于6. （防止有好友送的能量球不能收取，卡循环）
       obj.isHelp = false
       return this.collectTargetFriend(obj)
     }

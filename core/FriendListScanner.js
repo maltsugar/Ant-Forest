@@ -584,7 +584,7 @@ FriendListScanner.prototype.cutAndSaveImage = function (screen, countdownInfo) {
 }
 
 /**
- * 判断是否可收取
+ * 好友列表是否可操作
  * @param {Object} obj 好友控件对象
  * @param {Object} screen 截图
  * @param {string} name 好友名称
@@ -659,7 +659,7 @@ FriendListScanner.prototype.isObtainable = function (obj, screen, name) {
         container.canDo = true
       } else if (
         _config.help_friend &&
-        // 是否可帮收取
+        // 是否可帮收取，列表可帮助收取的爱心背景颜色
         images.findColor(screen, _config.can_help_color || '#f99236', {
           region: [o_x, o_y, o_w, o_h],
           threshold: threshold
