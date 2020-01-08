@@ -228,7 +228,7 @@ const ImgBasedFriendListScanner = function () {
   }
 
   this.sortAndReduce = function (points, gap) {
-    gap = gap || 110
+    gap = gap || _config.friendsJunkGap
     // 默认情况下已经排序了 没必要再次排序
     let last = -gap - 1
     let resultPoints = []

@@ -78,6 +78,10 @@ let default_config = {
   bottomHeight: 200,
   // 虚拟按键的精确高度
   virtualButtonHeight: 0,
+
+  // 好友列表跳过的间隙（和上一个点相比，小于这个距离的点会被丢弃）
+  friendsJunkGap: 110,
+
   // 是否使用模拟的滑动，如果滑动有问题开启这个 当前默认关闭 经常有人手机上有虚拟按键 然后又不看文档注释的
   useCustomScrollDown: true,
   // 排行榜列表下滑速度 200毫秒 不要太低否则滑动不生效 仅仅针对useCustomScrollDown=true的情况
@@ -158,6 +162,7 @@ if (!inRunningMode) {
   const setScrollDownUiVal = function () {
     ui.friendListScrollTimeInpt.text(config.friendListScrollTime + '')
     ui.fingerImgPixelsInpt.text(config.finger_img_pixels + '')
+    ui.friendsJunkGap.text(config.friendsJunkGap + '')
     ui.checkBottomBaseImgChkBox.setChecked(config.checkBottomBaseImg)
     ui.baseOnImageContainer.setVisibility(config.base_on_image ? View.VISIBLE : View.GONE)
     ui.useOcrParentContainer.setVisibility(config.base_on_image ? View.VISIBLE : View.GONE)
@@ -564,6 +569,11 @@ if (!inRunningMode) {
                     <horizontal gravity="center" >
                       <text text="小手指像素点个数:" />
                       <input layout_weight="70" inputType="number" id="fingerImgPixelsInpt" layout_weight="70" />
+                    </horizontal>
+                    <horizontal gravity="center" >
+                      sdfsdfs
+                      <text text="好友列表跳过的间隙:" />
+                      <input layout_weight="70" inputType="number" id="friendsJunkGap" layout_weight="70" />
                     </horizontal>
                   </vertical>
 
@@ -1262,6 +1272,10 @@ if (!inRunningMode) {
     ui.fingerImgPixelsInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.finger_img_pixels = parseInt(text) })
     )
+    ui.friendsJunkGap.addTextChangedListener(
+      TextWatcherBuilder(text => { config.friendsJunkGap = parseInt(text) })
+    )
+
     ui.delayStartTimeInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.delayStartTime = parseInt(text) })
     )
