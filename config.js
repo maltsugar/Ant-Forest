@@ -571,7 +571,6 @@ if (!inRunningMode) {
                       <input layout_weight="70" inputType="number" id="fingerImgPixelsInpt" layout_weight="70" />
                     </horizontal>
                     <horizontal gravity="center" >
-                      sdfsdfs
                       <text text="好友列表跳过的间隙:" />
                       <input layout_weight="70" inputType="number" id="friendsJunkGap" layout_weight="70" />
                     </horizontal>
