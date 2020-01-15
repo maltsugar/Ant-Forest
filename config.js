@@ -2,7 +2,7 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-09 20:42:08
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2019-12-30 16:40:51
+ * @Last Modified time: 2020-01-14 17:05:03
  * @Description: 
  */
 "ui";
@@ -15,6 +15,9 @@ if (currentEngine.endsWith('/config.js')) {
 importClass(android.text.TextWatcher)
 importClass(android.view.View)
 importClass(android.view.MotionEvent)
+importClass(java.util.concurrent.LinkedBlockingQueue)
+importClass(java.util.concurrent.ThreadPoolExecutor)
+importClass(java.util.concurrent.TimeUnit)
 
 let default_config = {
   develop_mode: false,
@@ -129,6 +132,8 @@ let default_config = {
   rank_check_top: 230,
   rank_check_width: 700,
   rank_check_height: 135,
+  device_width: device.width,
+  device_height: device.height
 }
 const CONFIG_STORAGE_NAME = 'ant_forest_config_fork_version'
 let config = {}
@@ -146,6 +151,10 @@ if (typeof config.collectable_energy_ball_content !== 'string') {
 }
 
 if (!inRunningMode) {
+  if (config.device_height === 0 || config.device_width === 0) {
+    toastLog('请先运行config.js并输入设备宽高')
+    exit()
+  }
   module.exports = {
     config: config,
     default_config: default_config,
@@ -153,10 +162,18 @@ if (!inRunningMode) {
   }
 } else {
 
+  let threadPool = new ThreadPoolExecutor(4, 4, 60, TimeUnit.SECONDS, new LinkedBlockingQueue(16))
+  let floatyWindow = null
+  let floatyLock = threads.lock()
+  let count = 10
+  let countdownThread = null
+  let loadingDialog = null
+
   const _hasRootPermission = files.exists("/sbin/su") || files.exists("/system/xbin/su") || files.exists("/system/bin/su")
   // 传递给commonFunction 避免二次引用config.js
   const storage_name = CONFIG_STORAGE_NAME
   let commonFunctions = require('./lib/CommonFunction.js')
+  let AesUtil = require('./lib/AesUtil.js')
   // 初始化list 为全局变量
   let whiteList = [], wateringBlackList = [], helpBallColorList = []
   const setScrollDownUiVal = function () {
@@ -192,6 +209,48 @@ if (!inRunningMode) {
     ui.useOcrContainer.setVisibility(config.useOcr ? View.VISIBLE : View.GONE)
   }
 
+  const inputDeviceSize = function () {
+    return Promise.resolve().then(() => {
+      return dialogs.rawInput('请输入设备宽度：', config.device_width + '')
+    }).then(x => {
+      if (x) {
+        let xVal = parseInt(x)
+        if (isFinite(xVal) && xVal > 0) {
+          config.device_width = xVal
+        } else {
+          toast('输入值无效')
+        }
+      }
+    }).then(() => {
+      return dialogs.rawInput('请输入设备高度：', config.device_height + '')
+    }).then(y => {
+      if (y) {
+        let yVal = parseInt(y)
+        if (isFinite(yVal) && yVal > 0) {
+          config.device_height = yVal
+        } else {
+          toast('输入值无效')
+        }
+      }
+    })
+  }
+
+  const setDeviceSizeText = function () {
+    ui.deviceSizeText.text(config.device_width + 'px ' + config.device_height + 'px')
+  }
+
+  const setColorSeekBar = function () {
+    let rgbColor = colors.parseColor(config.min_floaty_color)
+    let rgbColors = {
+      red: colors.red(rgbColor),
+      green: colors.green(rgbColor),
+      blue: colors.blue(rgbColor),
+    }
+    ui.redSeekbar.setProgress(parseInt(rgbColors.red / 255 * 100))
+    ui.greenSeekbar.setProgress(parseInt(rgbColors.green / 255 * 100))
+    ui.blueSeekbar.setProgress(parseInt(rgbColors.blue / 255 * 100))
+  }
+
   const resetUiValues = function () {
     // 重置为默认
     whiteList = []
@@ -213,21 +272,12 @@ if (!inRunningMode) {
       ui.floatyColor.setTextColor(colors.parseColor(configColor))
     }
     ui.floatyX.text(config.min_floaty_x + '')
-    ui.floatyXSeekBar.setProgress(parseInt(config.min_floaty_x / device.width * 100))
+    ui.floatyXSeekBar.setProgress(parseInt(config.min_floaty_x / config.device_width * 100))
     ui.floatyY.text(config.min_floaty_y + '')
-    ui.floatyYSeekBar.setProgress(parseInt(config.min_floaty_y / device.height * 100))
+    ui.floatyYSeekBar.setProgress(parseInt(config.min_floaty_y / config.device_height * 100))
     ui.colorSelectorChkBox.setChecked(false)
     ui.colorSelectorContainer.setVisibility(View.GONE)
-    let rgbColor = colors.parseColor(config.min_floaty_color)
-    let rgbColors = {
-      red: colors.red(rgbColor),
-      green: colors.green(rgbColor),
-      blue: colors.blue(rgbColor),
-    }
-    log(config.min_floaty_color + + ' ' + rgbColor + ' color config:' + JSON.stringify(rgbColors))
-    ui.redSeekbar.setProgress(parseInt(rgbColors.red / 255) * 100)
-    ui.greenSeekbar.setProgress(parseInt(rgbColors.green / 255) * 100)
-    ui.blueSeekbar.setProgress(parseInt(rgbColors.blue / 255) * 100)
+    setColorSeekBar()
 
     ui.notLingeringFloatWindowChkBox.setChecked(config.notLingeringFloatWindow)
     ui.helpFriendChkBox.setChecked(config.help_friend)
@@ -251,9 +301,9 @@ if (!inRunningMode) {
     ui.requestCapturePermissionChkBox.setChecked(config.request_capture_permission)
 
     ui.lockX.text(config.lock_x + '')
-    ui.lockXSeekBar.setProgress(parseInt(config.lock_x / device.width * 100))
+    ui.lockXSeekBar.setProgress(parseInt(config.lock_x / config.device_width * 100))
     ui.lockY.text(config.lock_y + '')
-    ui.lockYSeekBar.setProgress(parseInt(config.lock_y / device.height * 100))
+    ui.lockYSeekBar.setProgress(parseInt(config.lock_y / config.device_height * 100))
     ui.autoLockChkBox.setChecked(config.auto_lock)
     ui.lockPositionContainer.setVisibility(config.auto_lock && !_hasRootPermission ? View.VISIBLE : View.INVISIBLE)
     ui.lockDescNoRoot.setVisibility(!_hasRootPermission ? View.VISIBLE : View.INVISIBLE)
@@ -344,8 +394,9 @@ if (!inRunningMode) {
     }
     ui.helpBallColorsList.setDataSource(helpBallColorList)
 
+    setDeviceSizeText()
   }
-  let loadingDialog = null
+
   threads.start(function () {
     loadingDialog = dialogs.build({
       title: "加载中...",
@@ -393,6 +444,12 @@ if (!inRunningMode) {
                   <horizontal gravity="center" id="alipayLockPasswordContainer">
                     <text text="支付宝手势密码对应的九宫格数字：" textSize="10sp" />
                     <input id="alipayLockPasswordInpt" inputType="textPassword" layout_weight="80" />
+                  </horizontal>
+                  <horizontal w="*" h="1sp" bg="#cccccc" margin="5 5"></horizontal>
+                  <horizontal gravity="center">
+                    <text text="设备宽高：" textColor="black" textSize="16sp" />
+                    <text id="deviceSizeText" text="" />
+                    <button id="changeDeviceSizeBtn" >修改</button>
                   </horizontal>
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 5"></horizontal>
                   {/* 颜色识别 */}
@@ -454,7 +511,7 @@ if (!inRunningMode) {
                   </horizontal>
                   {/* 是否永不停止 */}
                   <vertical id="neverStopContainer">
-                    <text text="永不停止模式请不要全天24小时运行，具体见README.md"/>
+                    <text text="永不停止模式请不要全天24小时运行，具体见README" />
                     <horizontal gravity="center">
                       <checkbox id="isNeverStopChkBox" text="是否永不停止" />
                       <horizontal padding="10 0" id="reactiveTimeContainer" gravity="center" layout_weight="75">
@@ -706,7 +763,7 @@ if (!inRunningMode) {
                     <text text="保护罩:" layout_weight="20" />
                     <input inputType="text" id="usingProtectContentInpt" layout_weight="80" />
                   </horizontal>
-                  <text text="通过运行 util/悬浮窗框位置.js 可以获取对应位置信息"/>
+                  <text text="通过运行 util/悬浮窗框位置.js 可以获取对应位置信息" />
                   <horizontal gravity="center">
                     <text text="校验排行榜分析范围:" layout_weight="20" />
                     <input inputType="text" id="rankCheckRegion" layout_weight="80" />
@@ -755,9 +812,16 @@ if (!inRunningMode) {
     // 创建选项菜单(右上角)
     ui.emitter.on("create_options_menu", menu => {
       menu.add("全部重置为默认")
+      menu.add("从配置文件中读取")
+      menu.add("将配置导出")
+      menu.add("导入运行时数据")
+      menu.add("导出运行时数据")
     })
     // 监听选项菜单点击
     ui.emitter.on("options_item_selected", (e, item) => {
+      let local_config_path = files.cwd() + '/local_config.cfg'
+      let runtime_store_path = files.cwd() + '/runtime_store.cfg'
+      let aesKey = device.getAndroidId()
       switch (item.getTitle()) {
         case "全部重置为默认":
           confirm('确定要将所有配置重置为默认值吗？').then(ok => {
@@ -771,6 +835,120 @@ if (!inRunningMode) {
             }
           })
           break
+        case "从配置文件中读取":
+          confirm('确定要从local_config.cfg中读取配置吗？').then(ok => {
+            if (ok) {
+              try {
+                if (files.exists(local_config_path)) {
+                  const refillConfigs = function (configStr) {
+                    let local_config = JSON.parse(configStr)
+                    Object.keys(default_config).forEach(key => {
+                      let defaultValue = local_config[key]
+                      if (typeof defaultValue === 'undefined') {
+                        defaultValue = default_config[key]
+                      }
+                      config[key] = defaultValue
+                      storageConfig.put(key, defaultValue)
+                    })
+                    resetUiValues()
+                  }
+                  let configStr = AesUtil.decrypt(files.read(local_config_path), aesKey)
+                  if (!configStr) {
+                    toastLog('local_config.cfg解密失败, 请尝试输入秘钥')
+                    dialogs.rawInput('请输入秘钥，可通过device.getAndroidId()获取')
+                      .then(key => {
+                        if (key) {
+                          key = key.trim()
+                          configStr = AesUtil.decrypt(files.read(local_config_path), key)
+                          if (configStr) {
+                            refillConfigs(configStr)
+                          } else {
+                            toastLog('秘钥不正确，无法解析')
+                          }
+                        }
+                      })
+                  } else {
+                    refillConfigs(configStr)
+                  }
+                } else {
+                  toastLog('local_config.cfg不存在无法导入')
+                }
+              } catch (e) {
+                toastLog(e)
+              }
+            }
+          })
+          break
+        case "将配置导出":
+          confirm('确定要将配置导出到local_config.cfg吗？此操作会覆盖已有的local_config数据').then(ok => {
+            if (ok) {
+              Object.keys(default_config).forEach(key => {
+                console.verbose(key + ': ' + config[key])
+              })
+              try {
+                let configString = AesUtil.encrypt(JSON.stringify(config), aesKey)
+                files.write(local_config_path, configString)
+                toastLog('配置信息导出成功，刷新目录即可，local_config.cfg内容已加密仅本机可用，除非告知秘钥')
+              } catch (e) {
+                toastLog(e)
+              }
+
+            }
+          })
+          break
+        case "导出运行时数据":
+          confirm('确定要将运行时数据导出到runtime_store.cfg吗？此操作会覆盖已有的数据').then(ok => {
+            if (ok) {
+              try {
+                let runtimeStorageStr = AesUtil.encrypt(commonFunctions.exportRuntimeStorage(), aesKey)
+                files.write(runtime_store_path, runtimeStorageStr)
+              } catch (e) {
+                toastLog(e)
+              }
+            }
+          })
+          break
+        case "导入运行时数据":
+          confirm('确定要将从runtime_store.cfg导入运行时数据吗？此操作会覆盖已有的数据').then(ok => {
+            if (ok) {
+              if (files.exists(runtime_store_path)) {
+                let encrypt_content = files.read(runtime_store_path)
+                const resetRuntimeStore = function (runtimeStorageStr) {
+                  if (commonFunctions.importRuntimeStorage(runtimeStorageStr)) {
+                    resetUiValues()
+                    return true
+                  }
+                  toastLog('导入运行配置失败，无法读取正确信息')
+                  return false
+                }
+                try {
+                  let decrypt = AesUtil.decrypt(encrypt_content, aesKey)
+                  if (!decrypt) {
+                    toastLog('runtime_store.cfg解密失败, 请尝试输入秘钥')
+                    dialogs.rawInput('请输入秘钥，可通过device.getAndroidId()获取')
+                      .then(key => {
+                        if (key) {
+                          key = key.trim()
+                          decrypt = AesUtil.decrypt(encrypt_content, key)
+                          if (decrypt) {
+                            resetRuntimeStore(decrypt)
+                          } else {
+                            toastLog('秘钥不正确，无法解析')
+                          }
+                        }
+                      })
+                  } else {
+                    resetRuntimeStore(decrypt)
+                  }
+                } catch (e) {
+                  toastLog(e)
+                }
+              } else {
+                toastLog('配置信息不存在，无法导入')
+              }
+            }
+          })
+          break
       }
       e.consumed = true
     })
@@ -778,7 +956,11 @@ if (!inRunningMode) {
 
     ui.viewpager.setTitles(['基本配置', '进阶配置', '控件文本配置'])
     ui.tabs.setupWithViewPager(ui.viewpager)
-    resetUiValues()
+    if (config.device_height === 0 || config.device_width === 0) {
+      inputDeviceSize().then(() => resetUiValues())
+    } else {
+      resetUiValues()
+    }
     // 列表监听
     ui.whiteList.on('item_bind', function (itemView, itemHolder) {
       // 绑定删除事件
@@ -888,24 +1070,10 @@ if (!inRunningMode) {
       config.color_offset = trueVal
     })
 
-    ui.floatyXSeekBar.on('touch', () => {
-      let precent = ui.floatyXSeekBar.getProgress()
-      let trueVal = parseInt(precent * device.width / 100)
-      ui.floatyX.text('' + trueVal)
-      config.min_floaty_x = trueVal
-    })
-
-    ui.floatyYSeekBar.on('touch', () => {
-      let precent = ui.floatyYSeekBar.getProgress()
-      let trueVal = parseInt(precent * device.height / 100)
-      ui.floatyY.text('' + trueVal)
-      config.min_floaty_y = trueVal
-    })
-
-
     ui.colorSelectorChkBox.on('click', () => {
       let show = ui.colorSelectorChkBox.isChecked()
       if (show) {
+        setColorSeekBar()
         ui.colorSelectorContainer.setVisibility(View.VISIBLE)
       } else {
         ui.colorSelectorContainer.setVisibility(View.GONE)
@@ -935,8 +1103,12 @@ if (!inRunningMode) {
       resetColorTextBySelector()
     })
 
+    ui.changeDeviceSizeBtn.on('click', () => {
+      inputDeviceSize().then(() => setDeviceSizeText())
+    })
+
     ui.showThresholdConfig.on('click', () => {
-      threads.start(function () {
+      threadPool.execute(function () {
         dialogs.rawInput("请输入颜色相似度（0-255）", config.color_offset + '', val => {
           if (!val) {
             return
@@ -952,6 +1124,82 @@ if (!inRunningMode) {
           }
         })
       })
+    })
+
+    const setFloatyStatusIfExist = function () {
+      try {
+        floatyLock.lock()
+        if (floatyWindow !== null) {
+          count = 10
+          threadPool.execute(function () {
+            try {
+              floatyLock.lock()
+              if (floatyWindow !== null) {
+                floatyWindow.content.setTextColor(colors.parseColor(config.min_floaty_color))
+                floatyWindow.setPosition(config.min_floaty_x, config.min_floaty_y)
+                floatyWindow.content.text('悬浮窗' + count + '秒后关闭')
+              }
+            } finally {
+              floatyLock.unlock()
+            }
+          })
+          if (countdownThread === null || !countdownThread.isAlive()) {
+            countdownThread = threads.start(function () {
+              while (count-- > 0 && floatyWindow !== null) {
+                try {
+                  floatyWindow.content.text('悬浮窗' + count + '秒后关闭')
+                  log('悬浮窗' + count + '秒后关闭')
+                } catch (e) {
+                  console.error(e)
+                }
+                sleep(1000)
+              }
+              try {
+                floatyLock.lock()
+                if (floatyWindow !== null) {
+                  floatyWindow.close()
+                  floatyWindow = null
+                }
+              } finally {
+                floatyLock.unlock()
+              }
+            })
+          }
+        }
+      } finally {
+        floatyLock.unlock()
+      }
+    }
+
+
+    ui.floatyColor.addTextChangedListener(
+      TextWatcherBuilder(text => {
+        let val = text + ''
+        if (val) {
+          val = val.trim()
+        }
+        if (/^#[\dabcdef]{6}$/i.test(val)) {
+          ui.floatyColor.setTextColor(colors.parseColor(val))
+          config.min_floaty_color = val
+          setFloatyStatusIfExist()
+        }
+      })
+    )
+
+    ui.floatyXSeekBar.on('touch', () => {
+      let precent = ui.floatyXSeekBar.getProgress()
+      let trueVal = parseInt(precent * config.device_width / 100)
+      ui.floatyX.text('' + trueVal)
+      config.min_floaty_x = trueVal
+      setFloatyStatusIfExist()
+    })
+
+    ui.floatyYSeekBar.on('touch', () => {
+      let precent = ui.floatyYSeekBar.getProgress()
+      let trueVal = parseInt(precent * config.device_height / 100)
+      ui.floatyY.text('' + trueVal)
+      config.min_floaty_y = trueVal
+      setFloatyStatusIfExist()
     })
 
     ui.showFloatyPointConfig.on('click', () => {
@@ -979,64 +1227,33 @@ if (!inRunningMode) {
         }
       }).then(() => {
         ui.floatyX.text(config.min_floaty_x + '')
-        ui.floatyXSeekBar.setProgress(parseInt(config.min_floaty_x / device.width * 100))
+        ui.floatyXSeekBar.setProgress(parseInt(config.min_floaty_x / config.device_width * 100))
         ui.floatyY.text(config.min_floaty_y + '')
-        ui.floatyYSeekBar.setProgress(parseInt(config.min_floaty_y / device.height * 100))
-      })
-
-    })
-
-    ui.showLockPointConfig.on('click', () => {
-      Promise.resolve().then(() => {
-        return dialogs.rawInput('请输入X坐标：', config.lock_x + '')
-      }).then(x => {
-        if (x) {
-          let xVal = parseInt(x)
-          if (isFinite(xVal)) {
-            config.lock_x = xVal
-          } else {
-            toast('输入值无效')
-          }
-        }
-      }).then(() => {
-        return dialogs.rawInput('请输入Y坐标：', config.lock_y + '')
-      }).then(y => {
-        if (y) {
-          let yVal = parseInt(y)
-          if (isFinite(yVal)) {
-            config.lock_y = yVal
-          } else {
-            toast('输入值无效')
-          }
-        }
-      }).then(() => {
-        ui.lockX.text(config.lock_x + '')
-        ui.lockXSeekBar.setProgress(parseInt(config.lock_x / device.width * 100))
-        ui.lockY.text(config.lock_y + '')
-        ui.lockYSeekBar.setProgress(parseInt(config.lock_y / device.height * 100))
+        ui.floatyYSeekBar.setProgress(parseInt(config.min_floaty_y / config.device_height * 100))
+        setFloatyStatusIfExist()
       })
 
     })
 
     ui.testFloatyPosition.on('click', () => {
-      threads.start(function () {
-        sleep(300)
-        toastLog('准备初始化悬浮窗')
-        let floatyWindow = floaty.rawWindow(
-          <frame gravity='left'>
-            <text id='content' textSize='8dp' textColor='#00ff00' />
-          </frame>
-        )
-        let count = 5
-        floatyWindow.content.text('悬浮窗' + count + '秒后关闭')
-        floatyWindow.content.setTextColor(colors.parseColor(config.min_floaty_color))
-        floatyWindow.setPosition(config.min_floaty_x, config.min_floaty_y)
-        setInterval(function () {
-          floatyWindow.content.text('悬浮窗' + --count + '秒后关闭')
-        }, 1000)
-        setTimeout(function () {
-          floatyWindow.close()
-        }, 5000)
+      threadPool.execute(function () {
+        try {
+          floatyLock.lock()
+          if (floatyWindow === null) {
+            sleep(300)
+            toastLog('准备初始化悬浮窗')
+            floatyWindow = floaty.rawWindow(
+              <frame gravity='left'>
+                <text id='content' textSize='8dp' textColor='#00ff00' />
+              </frame>
+            )
+            setFloatyStatusIfExist()
+          }
+        } catch (e) {
+          toastLog(e)
+        } finally {
+          floatyLock.unlock()
+        }
       })
     })
 
@@ -1086,16 +1303,47 @@ if (!inRunningMode) {
 
     ui.lockXSeekBar.on('touch', () => {
       let precent = ui.lockXSeekBar.getProgress()
-      let trueVal = parseInt(precent * device.width / 100)
+      let trueVal = parseInt(precent * config.device_width / 100)
       ui.lockX.text('' + trueVal)
       config.lock_x = trueVal
     })
 
     ui.lockYSeekBar.on('touch', () => {
       let precent = ui.lockYSeekBar.getProgress()
-      let trueVal = parseInt(precent * device.height / 100)
+      let trueVal = parseInt(precent * config.device_height / 100)
       ui.lockY.text('' + trueVal)
       config.lock_y = trueVal
+    })
+
+    ui.showLockPointConfig.on('click', () => {
+      Promise.resolve().then(() => {
+        return dialogs.rawInput('请输入X坐标：', config.lock_x + '')
+      }).then(x => {
+        if (x) {
+          let xVal = parseInt(x)
+          if (isFinite(xVal)) {
+            config.lock_x = xVal
+          } else {
+            toast('输入值无效')
+          }
+        }
+      }).then(() => {
+        return dialogs.rawInput('请输入Y坐标：', config.lock_y + '')
+      }).then(y => {
+        if (y) {
+          let yVal = parseInt(y)
+          if (isFinite(yVal)) {
+            config.lock_y = yVal
+          } else {
+            toast('输入值无效')
+          }
+        }
+      }).then(() => {
+        ui.lockX.text(config.lock_x + '')
+        ui.lockXSeekBar.setProgress(parseInt(config.lock_x / config.device_width * 100))
+        ui.lockY.text(config.lock_y + '')
+        ui.lockYSeekBar.setProgress(parseInt(config.lock_y / config.device_height * 100))
+      })
     })
 
     ui.password.addTextChangedListener(
@@ -1110,19 +1358,6 @@ if (!inRunningMode) {
       config.is_alipay_locked = ui.isAlipayLockedChkBox.isChecked()
       ui.alipayLockPasswordContainer.setVisibility(config.is_alipay_locked ? View.VISIBLE : View.GONE)
     })
-
-    ui.floatyColor.addTextChangedListener(
-      TextWatcherBuilder(text => {
-        let val = text + ''
-        if (val) {
-          val = val.trim()
-        }
-        if (/^#[\dabcdef]{6}$/i.test(val)) {
-          ui.floatyColor.setTextColor(colors.parseColor(val))
-          config.min_floaty_color = val
-        }
-      })
-    )
 
     ui.cycleTimeInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.cycle_times = parseInt(text) })

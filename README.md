@@ -48,6 +48,7 @@
 - `新增` 加入自动识别基于控件还是图像分析的开关，好友数较多的直接使用基于图像分析即可
 - `20191221-新增` 支持支付宝手势密码解锁，勾选 `支付宝是否锁定` 然后填入手势顺序经过的九宫格数字，每个数字都需要填写，比如手势为简单的Z 则输入`1235789`
 - `20191221-新增` 截图权限相关默认 `获取截图等待时间` 是500毫秒，如果经常失败请修改该值 改大一些
+- `20200110-新增` 加入配置导出和导入的功能，通过AES加密，默认密码是device.getAndroidId()，因此仅本机可用。如果需要跨设备或者免费版和Pro版之间备份，自行获取device.getAndroidId()然后根据提示输入即可
 
 # 使用
 
@@ -63,6 +64,8 @@
 - 常用配置都在基本配置中，可以设置悬浮窗颜色 位置等
 - 运行配置后右上角菜单可以重置所有配置信息为默认值
 - 运行配置后可以看到百度API调用总次数和剩余次数
+- 配置导出导入功能，点击右上角菜单即可导出当前配置到local_config.cfg中，默认已加密加密密码为device.getAndriodId() 如果需要在免费版和付费版AutoJS之间同步 需要自行输入密码
+- 运行时数据导出导入功能同上所述
 
 ![基本配置](./resources/config-1.png)
 
@@ -84,36 +87,21 @@
 
 # 添加解锁设备
 
-在 Unlock.js 中，按照以下格式扩展：
+- 脚本根目录下新建extends文件夹，然后创建ExternalUnlockDevice.js文件，内容格式如下自定义
+- 具体可以参考ExternalUnlockDevice-demo.js
 
 ```javascript
-var Devices = {
-  device_1: function(obj) {
-    this.__proto__ = obj
+module.exports = function (obj) {
+  this.__proto__ = obj
 
-    this.unlock = function(password) {
-      if (typeof password !== "string") throw new Error("密码应为字符串！")
+  this.unlock = function(password) {
+    // 此处为自行编写的解锁代码
 
-      // 此处为解锁的代码
-
-      return this.check_unlock()
-    }
-  },
-  device_2: function(obj) {
-    ...
-  },
-  device_3: function(obj) {
-    ...
+    // 在结尾返回此语句用于判断是否解锁成功
+    return this.check_unlock()
   }
+
 }
-```
-
-上述所示为最简单的解锁模板，也可以参考 Unlock.js 默认多解锁方式的代码进行修改。
-
-然后在下方的 MyDevice 中设置解锁设备：
-
-```javascript
-var MyDevice = Devices.device_1
 ```
 
 # 注意事项

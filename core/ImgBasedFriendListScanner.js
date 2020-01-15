@@ -2,7 +2,7 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-11-11 09:17:29
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2019-12-30 04:36:20
+ * @Last Modified time: 2020-01-12 20:12:49
  * @Description: 基于图像识别控件信息
  */
 importClass(com.tony.BitCheck)
@@ -58,9 +58,9 @@ const Stack = function () {
   }
 }
 
-const SCALE_RATE = device.width / 1080
+const SCALE_RATE = _config.device_width / 1080
 const ANALYZE_WIDTH = parseInt(200 * SCALE_RATE)
-const BIT_MAX_VAL = device.height << 8 | ANALYZE_WIDTH
+const BIT_MAX_VAL = _config.device_height << 8 | ANALYZE_WIDTH
 debugInfo(['初始化 BitMap最大值为:{} 小手分析宽度:{} 缩放比例：{}', BIT_MAX_VAL, ANALYZE_WIDTH, SCALE_RATE])
 // 计算中心点
 function ColorRegionCenterCalculator (img, point, threshold) {
@@ -92,9 +92,9 @@ function ColorRegionCenterCalculator (img, point, threshold) {
    */
   this.getColorRegionCenter = function () {
     let maxX = -1
-    let minX = device.width + 10
+    let minX = _config.device_width + 10
     let maxY = -1
-    let minY = device.height + 10
+    let minY = _config.device_height + 10
     debugInfo(['准备获取[{}]的同色[{}]点区域', JSON.stringify(this.point), colors.toString(this.color)])
     let nearlyColorPoints = this.getAllColorRegionPoints()
     if (nearlyColorPoints && nearlyColorPoints.length > 0) {
@@ -131,8 +131,8 @@ function ColorRegionCenterCalculator (img, point, threshold) {
 
 
   this.isOutofScreen = function (point) {
-    let width = device.width
-    let height = device.height
+    let width = _config.device_width
+    let height = _config.device_height
     if (point.x >= width || point.x < 0 || point.y < 0 || point.y >= height) {
       return true
     }
@@ -183,7 +183,7 @@ function ColorRegionCenterCalculator (img, point, threshold) {
   }
 
   this.isUncheckedBitJava = function (point) {
-    let x_start = device.width - ANALYZE_WIDTH
+    let x_start = _config.device_width - ANALYZE_WIDTH
     if (point.x < x_start) {
       return false
     }
@@ -208,6 +208,7 @@ const ImgBasedFriendListScanner = function () {
   BaseScanner.call(this)
   this.threadPool = null
   this.min_countdown_pixels = 10
+  this.resolved_pixels = {}
 
   this.init = function (option) {
     this.current_time = option.currentTime || 0
@@ -223,6 +224,7 @@ const ImgBasedFriendListScanner = function () {
     this.increased_energy = 0
     this.min_countdown = 10000
     this.min_countdown_pixels = 10
+    this.resolved_pixels = {}
     debugInfo('图像分析即将开始')
     return this.collecting()
   }
@@ -253,8 +255,8 @@ const ImgBasedFriendListScanner = function () {
   }
 
   this.reachBottom = function (grayImg) {
-    let virtualButtonHeight = _config.virtualButtonHeight | 0
-    let height = device.height - virtualButtonHeight
+    let virtualButtonHeight = _config.virtualButtonHeight || 0
+    let height = _config.device_height - virtualButtonHeight
     for (let startY = 5; startY < 50; startY++) {
       let colorGreen = grayImg.getBitmap().getPixel(10, height - startY) >> 8 & 0xFF
       if (Math.abs(colorGreen - 245) > 4) {
@@ -266,6 +268,8 @@ const ImgBasedFriendListScanner = function () {
   this.collecting = function () {
     let screen = null
     let grayScreen = null
+    let screenForDetectCollect = null
+    let screenForDetectHelp = null
     // console.show()
     let countingDownContainers = []
     let count = 0
@@ -275,13 +279,16 @@ const ImgBasedFriendListScanner = function () {
       screen = _commonFunctions.checkCaptureScreenPermission(false, 5)
       // 重新复制一份
       let tmpImg = images.copy(screen)
+      screenForDetectCollect = images.copy(screen)
+      screenForDetectHelp = images.copy(screen)
       grayScreen = images.grayscale(tmpImg)
       tmpImg.recycle()
       debugInfo('获取到screen' + (screen === null ? '失败' : '成功'))
+      screen.recycle()
       let countdown = new Countdown()
       let waitForCheckPoints = []
       if (_config.help_friend) {
-        let helpPoints = this.sortAndReduce(this.detectHelp(screen))
+        let helpPoints = this.sortAndReduce(this.detectHelp(screenForDetectHelp))
         if (helpPoints && helpPoints.length > 0) {
           waitForCheckPoints = waitForCheckPoints.concat(helpPoints.map(
             helpPoint => {
@@ -293,7 +300,7 @@ const ImgBasedFriendListScanner = function () {
           )
         }
       }
-      let collectPoints = this.sortAndReduce(this.detectCollect(screen))
+      let collectPoints = this.sortAndReduce(this.detectCollect(screenForDetectCollect))
       if (collectPoints && collectPoints.length > 0) {
         waitForCheckPoints = waitForCheckPoints.concat(collectPoints.map(
           collectPoint => {
@@ -340,7 +347,7 @@ const ImgBasedFriendListScanner = function () {
                 debugInfo('倒计时中：' + JSON.stringify(point) + ' 像素点总数：' + point.same)
                 // 直接标记执行完毕 将OCR请求交给异步处理
                 countdownLatch.countDown()
-                if (_config.useOcr) {
+                if (_config.useOcr && !_config.is_cycle) {
                   let countdownImg = images.clip(grayScreen, point.left, point.top, point.right - point.left, point.bottom - point.top)
                   let base64String = null
                   try {
@@ -353,7 +360,13 @@ const ImgBasedFriendListScanner = function () {
                     errorInfo('存储倒计时图片失败：' + e)
                   }
                   if (base64String) {
-                    if (point.same > (_config.ocrThresold || 2900) && that.min_countdown >= 2) {
+                    if (that.resolved_pixels[point.same]) {
+                      debugInfo(['该像素点总数[{}]已校验过，倒计时值为：{}', point.same, that.resolved_pixels[point.same + 'count']])
+                      return
+                    } else {
+                      debugInfo(['该像素点总数[{}]未校验', point.same])
+                    }
+                    if (point.same >= (_config.ocrThreshold || 2900) && that.min_countdown >= 2) {
                       // 百度识图API获取文本
                       let result = BaiduOcrUtil.recoginze(base64String)
                       if (result && result.words_result_num > 0) {
@@ -362,6 +375,9 @@ const ImgBasedFriendListScanner = function () {
                           debugInfo('百度识图结果：' + JSON.stringify(filter))
                           countdownLock.lock()
                           let countdown = parseInt(filter[0].words)
+                          // 标记该像素点总数的图片已处理过
+                          that.resolved_pixels[point.same] = true
+                          that.resolved_pixels[point.same + 'count'] = countdown
                           if (countdown < that.min_countdown) {
                             debugInfo('设置最小倒计时：' + countdown)
                             that.min_countdown = countdown
@@ -374,6 +390,8 @@ const ImgBasedFriendListScanner = function () {
                           countdownLock.unlock()
                         }
                       }
+                    } else {
+                      debugInfo(['当前倒计时校验最小像素阈值：{} 以获取最小倒计时：{}', (_config.ocrThreshold || 2900), that.min_countdown])
                     }
                   }
                 }
@@ -434,7 +452,8 @@ const ImgBasedFriendListScanner = function () {
       } else {
         hasNext = count < (_config.friendListScrollTime || 30)
       }
-      screen.recycle()
+      screenForDetectCollect.recycle()
+      screenForDetectHelp.recycle()
       grayScreen.recycle()
       // 每5次滑动判断一次是否在排行榜中
       if (hasNext && count % 5 == 0 && !_widgetUtils.friendListWaiting()) {
@@ -488,9 +507,9 @@ const ImgBasedFriendListScanner = function () {
     let movingY = parseInt(200 * SCALE_RATE)
     let movingX = parseInt(100 * SCALE_RATE)
     // 预留70左右的高度
-    let endY = device.height - movingY - 70 * SCALE_RATE
+    let endY = _config.device_height - movingY - 70 * SCALE_RATE
     let runningY = 440 * SCALE_RATE
-    let startX = device.width - movingX
+    let startX = _config.device_width - movingX
     let regionWindow = []
     let findColorPoints = []
     let countdown = new Countdown()
@@ -524,7 +543,6 @@ ImgBasedFriendListScanner.prototype.returnToListAndCheck = function () {
   sleep(500)
   let returnCount = 0
   while (!_widgetUtils.friendListWaiting()) {
-    sleep(500)
     if (returnCount++ === 2) {
       // 等待两秒后再次触发
       automator.back()
@@ -540,12 +558,12 @@ ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
   let rentery = false
   if (!obj.protect) {
     //automator.click(obj.target.centerX(), obj.target.centerY())
-    debugInfo(['等待进入好友主页, 位置：「{}, {}」设备宽高：[{}, {}]', obj.point.x, obj.point.y, device.width, device.height])
+    debugInfo(['等待进入好友主页, 位置：「{}, {}」设备宽高：[{}, {}]', obj.point.x, obj.point.y, _config.device_width, _config.device_height])
     if (_config.develop_mode) {
       let screen = _commonFunctions.checkCaptureScreenPermission()
       let startY = obj.point.y - 32
-      let height = device.height - startY > 190 ? 190 : device.height - startY - 1
-      let rangeImg = images.clip(screen, 0, startY, device.width, height)
+      let height = _config.device_height - startY > 190 ? 190 : _config.device_height - startY - 1
+      let rangeImg = images.clip(screen, 0, startY, _config.device_width, height)
       let base64 = images.toBase64(rangeImg)
       screen.recycle()
       rangeImg.recycle()
@@ -586,7 +604,7 @@ ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
       skip = true
     }
     if (!skip && _commonFunctions.checkIsProtected(obj.name)) {
-      debugInfo(['{} 使用了保护罩 不收取他'])
+      warnInfo(['{} 使用了保护罩 不收取他', obj.name])
       skip = true
     }
     if (!skip && this.protectInfoDetect(obj.name)) {
@@ -596,7 +614,7 @@ ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
     if (skip) {
       return this.returnToListAndCheck()
     }
-    debugInfo('准备开始收取')
+    debugInfo(['准备开始收取好友：「{}」', obj.name])
     let temp = this.protectDetect(_package_name, obj.name)
     let preGot
     let preE
@@ -653,7 +671,7 @@ ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
             helpCollect: gotEnergy
           })
         } else {
-          debugInfo("帮助好友:" + obj.name + " 回收能量 " + gotEnergy + "g")
+          logInfo("帮助好友:" + obj.name + " 回收能量 " + gotEnergy + "g")
         }
       }
     } catch (e) {

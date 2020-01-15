@@ -2,7 +2,7 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-11-11 09:17:29
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2019-12-18 15:28:29
+ * @Last Modified time: 2020-01-08 11:41:23
  * @Description: 基于控件识别可收取信息
  */
 let _widgetUtils = typeof WidgetUtils === 'undefined' ? require('../lib/WidgetUtils.js') : WidgetUtils
@@ -472,7 +472,7 @@ FriendListScanner.prototype.collectTargetFriend = function (obj) {
       automator.back()
       return
     }
-    debugInfo('准备开始收取')
+    debugInfo(['准备开始收取好友：「{}」', obj.name])
     let temp = this.protectDetect(_package_name, obj.name)
     let preGot
     let preE
@@ -530,7 +530,7 @@ FriendListScanner.prototype.collectTargetFriend = function (obj) {
             helpCollect: gotEnergy
           })
         } else {
-          debugInfo("帮助好友:" + obj.name + " 回收能量 " + gotEnergy + "g")
+          logInfo("帮助好友:" + obj.name + " 回收能量 " + gotEnergy + "g")
         }
       }
     } catch (e) {
@@ -541,7 +541,6 @@ FriendListScanner.prototype.collectTargetFriend = function (obj) {
     debugInfo('好友能量收取完毕, 回到好友排行榜')
     let returnCount = 0
     while (!_widgetUtils.friendListWaiting()) {
-      sleep(1000)
       if (returnCount++ === 2) {
         // 等待两秒后再次触发
         automator.back()
