@@ -551,10 +551,10 @@ FriendListScanner.prototype.collectTargetFriend = function (obj) {
         return false
       }
     }
-    if (rentery && obj.renteryCount < 6) {
+    if (rentery && obj.renteryCount < 4) {
       // 满足重试条件（在BaseScanner里有条件）， 且重试次数小于6. （防止有好友送的能量球不能收取，卡循环）
       if (obj.renteryCount > 1) {
-        toastLog('可能遇到无法收取的能量球，重试5次后跳过，当前: 第' + obj.renteryCount + '次')
+        toastLog('可能遇到无法收取的能量球，重试3次后跳过，当前: 第' + obj.renteryCount + '次')
       }
       
       obj.isHelp = false
