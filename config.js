@@ -2,7 +2,7 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-09 20:42:08
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-01-14 17:05:03
+ * @Last Modified time: 2020-01-19 23:29:43
  * @Description: 
  */
 "ui";
@@ -93,8 +93,6 @@ let default_config = {
   can_collect_color: '#1da06a',
   can_help_color: '#f99236',
   helpBallColors: ['#f99236', '#f7af70'],
-  // 浇水的球
-  waterBallColor: '#d1971a',
   // 是否开启自动浇水 每日收集某个好友达到下一个阈值之后会进行浇水
   wateringBack: true,
   // 浇水阈值40克
@@ -105,6 +103,8 @@ let default_config = {
   delayStartTime: 5,
   // 是否使用百度的ocr识别倒计时
   useOcr: false,
+  // 从缓存中获取ocr识别结果 根据像素点个数来获取 因此不是很准确
+  ocrUseCache: false,
   // 识别像素点阈值 识别到倒计时的绿色像素点 像素点越多数字相对越小，设置大一些可以节省调用次数 毕竟每天只有500次
   ocrThreshold: 2900,
   // 是否记录图片base64信息到日志中
@@ -151,7 +151,7 @@ if (typeof config.collectable_energy_ball_content !== 'string') {
 }
 
 if (!inRunningMode) {
-  if (config.device_height === 0 || config.device_width === 0) {
+  if (config.device_height <= 10 || config.device_width <= 10) {
     toastLog('请先运行config.js并输入设备宽高')
     exit()
   }
@@ -199,6 +199,7 @@ if (!inRunningMode) {
 
   const setOcrUiVal = function () {
     ui.useOcrChkBox.setChecked(config.useOcr)
+    ui.ocrUseCacheChkBox.setChecked(config.ocrUseCache)
     ui.ocrThresholdInpt.text(config.ocrThreshold + '')
     ui.saveBase64ImgInfoChkBox.setChecked(config.saveBase64ImgInfo)
     ui.apiKeyInpt.text(config.apiKey + '')
@@ -252,6 +253,8 @@ if (!inRunningMode) {
   }
 
   const resetUiValues = function () {
+    config.device_width = config.device_width > 0 ? config.device_width : 1
+    config.device_height = config.device_height > 0 ? config.device_height : 1
     // 重置为默认
     whiteList = []
     wateringBlackList = []
@@ -365,11 +368,7 @@ if (!inRunningMode) {
     if (colorRegex.test(helpColor)) {
       ui.canHelpColorInpt.setTextColor(colors.parseColor(helpColor))
     }
-    let waterBallColor = config.waterBallColor
-    ui.waterBallColorInpt.text(waterBallColor)
-    if (colorRegex.test(waterBallColor)) {
-      ui.waterBallColorInpt.setTextColor(colors.parseColor(waterBallColor))
-    }
+    
     ui.collectableEnergyBallContentInpt.text(config.collectable_energy_ball_content)
 
     // 列表绑定
@@ -647,29 +646,11 @@ if (!inRunningMode) {
                     <input layout_weight="70" inputType="number" id="bottomHeightInpt" />
                   </horizontal>
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
-                  {/* 线程池配置 */}
-                  <text text="图像识别的线程池配置，如果过于卡顿，请调低线程池大小，同时增加线程池等待时间。" />
-                  <horizontal gravity="center">
-                    <text text="线程池大小" layout_weight="20" />
-                    <input layout_weight="60" inputType="number" id="threadPoolSizeInpt" />
-                  </horizontal>
-                  <horizontal gravity="center">
-                    <text text="线程池最大大小" layout_weight="20" />
-                    <input layout_weight="60" inputType="number" id="threadPoolMaxSizeInpt" />
-                  </horizontal>
-                  <horizontal gravity="center">
-                    <text text="线程池等待队列大小" layout_weight="20" />
-                    <input layout_weight="60" inputType="number" id="threadPoolQueueSizeInpt" />
-                  </horizontal>
-                  <horizontal gravity="center">
-                    <text text="线程池等待时间（秒）" layout_weight="20" />
-                    <input layout_weight="60" inputType="number" id="threadPoolWaitingTimeInpt" />
-                  </horizontal>
-                  <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                   {/* 是否启用百度的OCR */}
                   <vertical id="useOcrParentContainer">
                     <checkbox id="useOcrChkBox" text="是否启用百度的OCR识别倒计时" />
                     <vertical id="useOcrContainer">
+                      <checkbox id="ocrUseCacheChkBox" text="是否从缓存中获取OCR识别的倒计时，非精确值" />
                       <checkbox id="saveBase64ImgInfoChkBox" text="是否记录图片Base64数据到日志" />
                       <text id="ocrInvokeCount" textSize="12sp" />
                       <text text="需要识别的倒计时绿色像素点数量，像素点越多倒计时数值越小，此时调用接口可以节省调用次数" textSize="10sp" />
@@ -678,6 +659,25 @@ if (!inRunningMode) {
                       <input id="apiKeyInpt" hint="apiKey" />
                       <input id="secretKeyInpt" inputType="textPassword" hint="apiKey" />
                     </vertical>
+                    <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
+                    {/* 线程池配置 */}
+                    <text text="图像识别的线程池配置，如果过于卡顿，请调低线程池大小，同时增加线程池等待时间。" />
+                    <horizontal gravity="center">
+                      <text text="线程池大小" layout_weight="20" />
+                      <input layout_weight="60" inputType="number" id="threadPoolSizeInpt" />
+                    </horizontal>
+                    <horizontal gravity="center">
+                      <text text="线程池最大大小" layout_weight="20" />
+                      <input layout_weight="60" inputType="number" id="threadPoolMaxSizeInpt" />
+                    </horizontal>
+                    <horizontal gravity="center">
+                      <text text="线程池等待队列大小" layout_weight="20" />
+                      <input layout_weight="60" inputType="number" id="threadPoolQueueSizeInpt" />
+                    </horizontal>
+                    <horizontal gravity="center">
+                      <text text="线程池等待时间（秒）" layout_weight="20" />
+                      <input layout_weight="60" inputType="number" id="threadPoolWaitingTimeInpt" />
+                    </horizontal>
                   </vertical>
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                   {/* 收取白名单列表 */}
@@ -780,11 +780,6 @@ if (!inRunningMode) {
                     <text text="列表中可帮助的颜色:" layout_weight="20" />
                     <input inputType="text" id="canHelpColorInpt" layout_weight="80" />
                   </horizontal>
-
-                  <horizontal gravity="center">
-                    <text text="浇水能量球的数字颜色:" layout_weight="20" />
-                    <input inputType="text" id="waterBallColorInpt" layout_weight="80" />
-                  </horizontal>
                   <vertical w="*" gravity="left" layout_gravity="left" margin="10">
                     <text text="帮收取能量球颜色" textColor="#666666" textSize="14sp" />
                     <frame>
@@ -831,6 +826,7 @@ if (!inRunningMode) {
                 config[key] = defaultValue
                 storageConfig.put(key, defaultValue)
               })
+              log('重置默认值')
               resetUiValues()
             }
           })
@@ -956,7 +952,7 @@ if (!inRunningMode) {
 
     ui.viewpager.setTitles(['基本配置', '进阶配置', '控件文本配置'])
     ui.tabs.setupWithViewPager(ui.viewpager)
-    if (config.device_height === 0 || config.device_width === 0) {
+    if (config.device_height <= 10 || config.device_width <= 10) {
       inputDeviceSize().then(() => resetUiValues())
     } else {
       resetUiValues()
@@ -1472,6 +1468,10 @@ if (!inRunningMode) {
       setOcrUiVal()
     })
 
+    ui.ocrUseCacheChkBox.on('click', () => {
+      config.ocrUseCache = ui.ocrUseCacheChkBox.isChecked()
+    })
+
     ui.saveBase64ImgInfoChkBox.on('click', () => {
       config.saveBase64ImgInfo = ui.saveBase64ImgInfoChkBox.isChecked()
       setOcrUiVal()
@@ -1580,18 +1580,6 @@ if (!inRunningMode) {
         }
       })
     )
-    ui.waterBallColorInpt.addTextChangedListener(
-      TextWatcherBuilder(text => {
-        let val = text + ''
-        if (val) {
-          val = val.trim()
-        }
-        if (/^#[\dabcdef]{6}$/i.test(val)) {
-          ui.waterBallColorInpt.setTextColor(colors.parseColor(val))
-          config.waterBallColor = val
-        }
-      })
-    )
     ui.collectableEnergyBallContentInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.collectable_energy_ball_content = text + '' })
     )
@@ -1618,7 +1606,7 @@ if (!inRunningMode) {
   }, 500)
 
   ui.emitter.on('pause', () => {
-    ui.finish()
+    // ui.finish()
     let isBlank = function (val) {
       return typeof val === 'undefined' || val === null || val === '' || ('' + val).trim() === ''
     }
