@@ -2,16 +2,17 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-19 10:53:08
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2019-12-20 20:45:49
+ * @Last Modified time: 2020-04-27 19:58:06
  * @Description: 
  */
 let WidgetUtils = require('../lib/WidgetUtils.js')
-let commonFunctions = require('../lib/CommonFunction.js')
-let { config } = require('../config.js')
-let automator = require('../lib/Automator.js')
+let singletoneRequire = require('../lib/SingletonRequirer.js')(runtime, this)
+let commonFunctions = singletoneRequire('CommonFunction')
+let { config } = require('../config.js')(runtime, this)
+let automator = singletoneRequire('Automator')
 let {
   debugInfo, logInfo, infoLog, warnInfo, errorInfo
-} = require('../lib/LogUtils.js')
+} = singletoneRequire('LogUtils')
 let count = 0
 while (count++ < 3) {
   WidgetUtils.wateringFriends()

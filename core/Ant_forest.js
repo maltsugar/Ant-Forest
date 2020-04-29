@@ -1,15 +1,16 @@
 /*
  * @Author: NickHopps
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-04-15 09:24:03
+ * @Last Modified time: 2020-04-25 19:12:10
  * @Description: 蚂蚁森林操作集
  */
-let _widgetUtils = typeof WidgetUtils === 'undefined' ? require('../lib/WidgetUtils.js') : WidgetUtils
-let automator = require('../lib/Automator.js')
-let _commonFunctions = typeof commonFunctions === 'undefined' ? require('../lib/CommonFunction.js') : commonFunctions
-let _runningQueueDispatcher = typeof runningQueueDispatcher === 'undefined' ? require('./RunningQueueDispatcher.js') : runningQueueDispatcher
-let _config = typeof config === 'undefined' ? require('../config.js').config : config
-let alipayUnlocker = require('../lib/AlipayUnlocker.js')
+let { config: _config } = require('../config.js')(runtime, this)
+let singletoneRequire = require('../lib/SingletonRequirer.js')(runtime, this)
+let _widgetUtils = singletoneRequire('WidgetUtils')
+let automator = singletoneRequire('Automator')
+let _commonFunctions = singletoneRequire('CommonFunction')
+let _runningQueueDispatcher = singletoneRequire('RunningQueueDispatcher')
+let alipayUnlocker = singletoneRequire('AlipayUnlocker')
 let FriendListScanner = require('./FriendListScanner.js')
 let ImgBasedFriendListScanner = null
 if (_config.base_on_image) {
@@ -286,7 +287,7 @@ function Ant_forest () {
       debugInfo('重新获取倒计时经过了：[' + passedTime + ']分，最终记录上轮倒计时：[' + lastMin + ']分')
       lastMin >= 0 ? temp.push(lastMin) : temp.push(0)
     }
-    let friCountDowmContainer = _widgetUtils.widgetGetAll('\\d+’', null, true)
+    let friCountDownContainer = _widgetUtils.widgetGetAll('\\d+’', null, true)
     let peekCountdownContainer = function (container) {
       if (container) {
         return _commonFunctions.formatString('倒计时数据总长度：{} 文本属性来自[{}]', container.target.length, (container.isDesc ? 'desc' : 'text'))
@@ -294,10 +295,10 @@ function Ant_forest () {
         return null
       }
     }
-    debugInfo('get \\d+’ container:' + peekCountdownContainer(friCountDowmContainer))
-    if (friCountDowmContainer) {
-      let isDesc = friCountDowmContainer.isDesc
-      friCountDowmContainer.target.forEach(function (countdown) {
+    debugInfo('get \\d+’ container:' + peekCountdownContainer(friCountDownContainer))
+    if (friCountDownContainer) {
+      let isDesc = friCountDownContainer.isDesc
+      friCountDownContainer.target.forEach(function (countdown) {
         let countdown_fri = null
         if (isDesc) {
           countdown_fri = parseInt(countdown.desc().match(/\d+/))
@@ -463,7 +464,7 @@ function Ant_forest () {
   // 收取能量
   const collectEnergy = function (own) {
     let isOwn = own || false
-    let ballCheckContainer = _widgetUtils.widgetGetAll(_config.collectable_energy_ball_content, null, true)
+    let ballCheckContainer = _widgetUtils.widgetGetAll(_config.collectable_energy_ball_content, 1000, true)
     if (ballCheckContainer !== null) {
       debugInfo('能量球存在')
       ballCheckContainer.target
@@ -613,9 +614,8 @@ function Ant_forest () {
     }
 
     this.readyForStart = function () {
-      // 解锁其实在main里面已经执行 这里是为了容错 觉得没必要可以注释掉
-      unlocker.exec()
       _runningQueueDispatcher.addRunningTask()
+      unlocker.exec()
       _commonFunctions.showDialogAndWait(true)
       this.listenStopCollect()
       _commonFunctions.showEnergyInfo()
@@ -748,7 +748,7 @@ function Ant_forest () {
         if (_lost_someone) {
           warnInfo('上一次收取有漏收，再次收集', true)
           automator.back()
-          _commonFunctions.getAndUpdateSpringboard('lost_someone')
+          _commonFunctions.getAndUpdateDismissReason('lost_someone')
         } else {
           debugInfo(['获取到的倒计时时间：{}', _min_countdown])
           if (_min_countdown > 0) {

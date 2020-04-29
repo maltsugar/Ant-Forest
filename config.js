@@ -2,15 +2,14 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-09 20:42:08
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-01-19 23:29:43
+ * @Last Modified time: 2020-04-27 14:44:26
  * @Description: 
  */
-"ui";
-let inRunningMode = false
+'ui';
+
 let currentEngine = engines.myEngine().getSource() + ''
-if (currentEngine.endsWith('/config.js')) {
-  inRunningMode = true
-}
+let isRunningMode = currentEngine.endsWith('/config.js') && typeof module === 'undefined'
+
 
 importClass(android.text.TextWatcher)
 importClass(android.view.View)
@@ -20,7 +19,6 @@ importClass(java.util.concurrent.ThreadPoolExecutor)
 importClass(java.util.concurrent.TimeUnit)
 
 let default_config = {
-  develop_mode: false,
   password: '',
   is_alipay_locked: false,
   alipay_lock_password: '',
@@ -43,6 +41,8 @@ let default_config = {
   max_collect_repeat: 20,
   max_collect_wait_time: 60,
   show_debug_log: true,
+  show_engine_id: false,
+  develop_mode: false,
   auto_lock: false,
   lock_x: 150,
   lock_y: 970,
@@ -135,7 +135,8 @@ let default_config = {
   device_width: device.width,
   device_height: device.height
 }
-const CONFIG_STORAGE_NAME = 'ant_forest_config_fork_version'
+let CONFIG_STORAGE_NAME = 'ant_forest_config_fork_version'
+let PROJECT_NAME = '蚂蚁森林能量收集'
 let config = {}
 let storageConfig = storages.create(CONFIG_STORAGE_NAME)
 Object.keys(default_config).forEach(key => {
@@ -150,15 +151,21 @@ if (typeof config.collectable_energy_ball_content !== 'string') {
   config.collectable_energy_ball_content = default_config.collectable_energy_ball_content
 }
 
-if (!inRunningMode) {
+if (!isRunningMode) {
   if (config.device_height <= 10 || config.device_width <= 10) {
     toastLog('请先运行config.js并输入设备宽高')
     exit()
   }
-  module.exports = {
-    config: config,
-    default_config: default_config,
-    storage_name: CONFIG_STORAGE_NAME
+  module.exports = function (__runtime__, scope) {
+    if (typeof scope.config_instance === 'undefined') {
+      scope.config_instance = {
+        config: config,
+        default_config: default_config,
+        storage_name: CONFIG_STORAGE_NAME,
+        project_name: PROJECT_NAME
+      }
+    }
+    return scope.config_instance
   }
 } else {
 
@@ -169,14 +176,12 @@ if (!inRunningMode) {
   let countdownThread = null
   let loadingDialog = null
 
-  const _hasRootPermission = files.exists("/sbin/su") || files.exists("/system/xbin/su") || files.exists("/system/bin/su")
-  // 传递给commonFunction 避免二次引用config.js
-  const storage_name = CONFIG_STORAGE_NAME
-  let commonFunctions = require('./lib/CommonFunction.js')
+  let _hasRootPermission = files.exists("/sbin/su") || files.exists("/system/xbin/su") || files.exists("/system/bin/su")
+  let commonFunctions = require('./lib/prototype/CommonFunction.js')
   let AesUtil = require('./lib/AesUtil.js')
   // 初始化list 为全局变量
   let whiteList = [], wateringBlackList = [], helpBallColorList = []
-  const setScrollDownUiVal = function () {
+  let setScrollDownUiVal = function () {
     ui.friendListScrollTimeInpt.text(config.friendListScrollTime + '')
     ui.fingerImgPixelsInpt.text(config.finger_img_pixels + '')
     ui.friendsJunkGap.text(config.friendsJunkGap + '')
@@ -197,7 +202,7 @@ if (!inRunningMode) {
 
   }
 
-  const setOcrUiVal = function () {
+  let setOcrUiVal = function () {
     ui.useOcrChkBox.setChecked(config.useOcr)
     ui.ocrUseCacheChkBox.setChecked(config.ocrUseCache)
     ui.ocrThresholdInpt.text(config.ocrThreshold + '')
@@ -210,7 +215,7 @@ if (!inRunningMode) {
     ui.useOcrContainer.setVisibility(config.useOcr ? View.VISIBLE : View.GONE)
   }
 
-  const inputDeviceSize = function () {
+  let inputDeviceSize = function () {
     return Promise.resolve().then(() => {
       return dialogs.rawInput('请输入设备宽度：', config.device_width + '')
     }).then(x => {
@@ -236,11 +241,11 @@ if (!inRunningMode) {
     })
   }
 
-  const setDeviceSizeText = function () {
+  let setDeviceSizeText = function () {
     ui.deviceSizeText.text(config.device_width + 'px ' + config.device_height + 'px')
   }
 
-  const setColorSeekBar = function () {
+  let setColorSeekBar = function () {
     let rgbColor = colors.parseColor(config.min_floaty_color)
     let rgbColors = {
       red: colors.red(rgbColor),
@@ -252,7 +257,7 @@ if (!inRunningMode) {
     ui.blueSeekbar.setProgress(parseInt(rgbColors.blue / 255 * 100))
   }
 
-  const resetUiValues = function () {
+  let resetUiValues = function () {
     config.device_width = config.device_width > 0 ? config.device_width : 1
     config.device_height = config.device_height > 0 ? config.device_height : 1
     // 重置为默认
@@ -298,6 +303,8 @@ if (!inRunningMode) {
 
     ui.showDebugLogChkBox.setChecked(config.show_debug_log)
     ui.saveLogFileChkBox.setChecked(config.saveLogFile)
+    ui.showEngineIdChkBox.setChecked(config.show_engine_id)
+    ui.developModeChkBox.setChecked(config.develop_mode)
     ui.fileSizeInpt.text(config.back_size + '')
     ui.fileSizeContainer.setVisibility(config.saveLogFile ? View.VISIBLE : View.INVISIBLE)
 
@@ -368,7 +375,7 @@ if (!inRunningMode) {
     if (colorRegex.test(helpColor)) {
       ui.canHelpColorInpt.setTextColor(colors.parseColor(helpColor))
     }
-    
+
     ui.collectableEnergyBallContentInpt.text(config.collectable_energy_ball_content)
 
     // 列表绑定
@@ -409,7 +416,7 @@ if (!inRunningMode) {
     }, 3000)
   })
 
-  const TextWatcherBuilder = function (textCallback) {
+  let TextWatcherBuilder = function (textCallback) {
     return new TextWatcher({
       onTextChanged: (text) => {
         textCallback(text + '')
@@ -536,6 +543,8 @@ if (!inRunningMode) {
                   </horizontal>
                   {/* 是否显示debug日志 */}
                   <checkbox id="showDebugLogChkBox" text="是否显示debug日志" />
+                  <checkbox id="showEngineIdChkBox" text="是否在控制台中显示脚本引擎id" />
+                  <checkbox id="developModeChkBox" text="是否启用开发模式" />
                   <horizontal gravity="center">
                     <checkbox id="saveLogFileChkBox" text="是否保存日志到文件" />
                     <horizontal padding="10 0" id="fileSizeContainer" gravity="center" layout_weight="75">
@@ -719,7 +728,6 @@ if (!inRunningMode) {
                     </frame>
                     <button w="*" id="addBlack" text="添加" gravity="center" layout_gravity="center" />
                   </vertical>
-                  <checkbox id="developModeChkBox" text="开发模式" />
                 </vertical>
               </ScrollView>
             </frame>
@@ -807,8 +815,8 @@ if (!inRunningMode) {
     // 创建选项菜单(右上角)
     ui.emitter.on("create_options_menu", menu => {
       menu.add("全部重置为默认")
-      menu.add("从配置文件中读取")
-      menu.add("将配置导出")
+      menu.add("从配置文件导入")
+      menu.add("导出到配置文件")
       menu.add("导入运行时数据")
       menu.add("导出运行时数据")
     })
@@ -831,12 +839,12 @@ if (!inRunningMode) {
             }
           })
           break
-        case "从配置文件中读取":
+        case "从配置文件导入":
           confirm('确定要从local_config.cfg中读取配置吗？').then(ok => {
             if (ok) {
               try {
                 if (files.exists(local_config_path)) {
-                  const refillConfigs = function (configStr) {
+                  let refillConfigs = function (configStr) {
                     let local_config = JSON.parse(configStr)
                     Object.keys(default_config).forEach(key => {
                       let defaultValue = local_config[key]
@@ -875,7 +883,7 @@ if (!inRunningMode) {
             }
           })
           break
-        case "将配置导出":
+        case "导出到配置文件":
           confirm('确定要将配置导出到local_config.cfg吗？此操作会覆盖已有的local_config数据').then(ok => {
             if (ok) {
               Object.keys(default_config).forEach(key => {
@@ -909,7 +917,7 @@ if (!inRunningMode) {
             if (ok) {
               if (files.exists(runtime_store_path)) {
                 let encrypt_content = files.read(runtime_store_path)
-                const resetRuntimeStore = function (runtimeStorageStr) {
+                let resetRuntimeStore = function (runtimeStorageStr) {
                   if (commonFunctions.importRuntimeStorage(runtimeStorageStr)) {
                     resetUiValues()
                     return true
@@ -1076,7 +1084,7 @@ if (!inRunningMode) {
       }
     })
 
-    const resetColorTextBySelector = function () {
+    let resetColorTextBySelector = function () {
       let progress = ui.redSeekbar.getProgress()
       let red = parseInt(progress * 255 / 100)
       progress = ui.greenSeekbar.getProgress()
@@ -1122,7 +1130,7 @@ if (!inRunningMode) {
       })
     })
 
-    const setFloatyStatusIfExist = function () {
+    let setFloatyStatusIfExist = function () {
       try {
         floatyLock.lock()
         if (floatyWindow !== null) {
@@ -1178,6 +1186,8 @@ if (!inRunningMode) {
           ui.floatyColor.setTextColor(colors.parseColor(val))
           config.min_floaty_color = val
           setFloatyStatusIfExist()
+        } else {
+          toast('颜色值无效，请重新输入')
         }
       })
     )
@@ -1276,6 +1286,14 @@ if (!inRunningMode) {
 
     ui.showDebugLogChkBox.on('click', () => {
       config.show_debug_log = ui.showDebugLogChkBox.isChecked()
+    })
+
+    ui.showEngineIdChkBox.on('click', () => {
+      config.show_engine_id = ui.showEngineIdChkBox.isChecked()
+    })
+
+    ui.developModeChkBox.on('click', () => {
+      config.develop_mode = ui.developModeChkBox.isChecked()
     })
 
     ui.saveLogFileChkBox.on('click', () => {
@@ -1493,9 +1511,6 @@ if (!inRunningMode) {
       ui.wateringBlackListContainer.setVisibility(config.wateringBack ? View.VISIBLE : View.GONE)
     })
 
-    ui.developModeChkBox.on('click', () => {
-      config.develop_mode = ui.developModeChkBox.isChecked()
-    })
     ui.wateringThresholdInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.wateringThreshold = parseInt(text) })
     )
@@ -1565,6 +1580,8 @@ if (!inRunningMode) {
         if (/^#[\dabcdef]{6}$/i.test(val)) {
           ui.canCollectColorInpt.setTextColor(colors.parseColor(val))
           config.can_collect_color = val
+        } else {
+          toast('颜色值无效，请重新输入')
         }
       })
     )
@@ -1577,6 +1594,8 @@ if (!inRunningMode) {
         if (/^#[\dabcdef]{6}$/i.test(val)) {
           ui.canHelpColorInpt.setTextColor(colors.parseColor(val))
           config.can_help_color = val
+        } else {
+          toast('颜色值无效，请重新输入')
         }
       })
     )
@@ -1584,18 +1603,6 @@ if (!inRunningMode) {
       TextWatcherBuilder(text => { config.collectable_energy_ball_content = text + '' })
     )
 
-
-    // let runningEngines = engines.all()
-    // let currentEngine = engines.myEngine()
-
-    // let runningSize = runningEngines.length
-    // if (runningSize >= 1) {
-    //   runningEngines.forEach(engine => {
-    //     if (engine.id !== currentEngine.id) {
-    //       engine.forceStop()
-    //     }
-    //   })
-    // }
 
     console.verbose('界面初始化耗时' + (new Date().getTime() - start) + 'ms')
     setTimeout(function () {
@@ -1606,7 +1613,6 @@ if (!inRunningMode) {
   }, 500)
 
   ui.emitter.on('pause', () => {
-    // ui.finish()
     let isBlank = function (val) {
       return typeof val === 'undefined' || val === null || val === '' || ('' + val).trim() === ''
     }

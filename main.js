@@ -1,32 +1,34 @@
 /*
  * @Author: NickHopps
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-04-09 21:01:43
+ * @Last Modified time: 2020-04-24 11:31:03
  * @Description: 蚂蚁森林自动收能量
  */
-let { config } = require('./config.js')
+let { config } = require('./config.js')(runtime, this)
+let singletoneRequire = require('./lib/SingletonRequirer.js')(runtime, this)
+
 if (config.base_on_image) {
   runtime.loadDex('./lib/autojs-tools.dex')
 }
-let runningQueueDispatcher = require('./lib/RunningQueueDispatcher.js')
-let LogUtils = require('./lib/LogUtils.js')
-let {
-  debugInfo, debugForDev, logInfo, infoLog, warnInfo, errorInfo, clearLogFile, appendLog, removeOldLogFiles
-} = LogUtils
-let FloatyInstance = require('./lib/FloatyUtil.js')
-let commonFunctions = require('./lib/CommonFunction.js')
+let runningQueueDispatcher = singletoneRequire('RunningQueueDispatcher')
+let { logInfo, errorInfo, warnInfo, debugInfo, infoLog } = singletoneRequire('LogUtils')
+let FloatyInstance = singletoneRequire('FloatyUtil')
+let commonFunctions = singletoneRequire('CommonFunction')
+let tryRequestScreenCapture = singletoneRequire('TryRequestScreenCapture')
+
 let unlocker = require('./lib/Unlock.js')
 let antForestRunner = require('./core/Ant_forest.js')
 let formatDate = require('./lib/DateUtil.js')
-let { tryRequestScreenCapture } = require('./lib/TryRequestScreenCapture.js')
 
 // 不管其他脚本是否在运行 清除任务队列 适合只使用蚂蚁森林的用户
 if (config.single_script) {
   logInfo('======单脚本运行直接清空任务队列=======')
   runningQueueDispatcher.clearAll()
 }
-logInfo('======校验是否重复运行，并加入任务队列=======')
+logInfo('======加入任务队列，并关闭重复运行的脚本=======')
 runningQueueDispatcher.addRunningTask()
+// 加入任务队列
+commonFunctions.killDuplicateScript()
 /***********************
  * 初始化
  ***********************/
@@ -70,10 +72,6 @@ try {
   exit()
 }
 logInfo('解锁成功')
-if (config.fuck_miui11) {
-  commonFunctions.showDialogAndWait()
-  commonFunctions.launchAutoJs()
-}
 
 // 请求截图权限
 let screenPermission = false
@@ -109,9 +107,11 @@ if (config.develop_mode) {
   } catch (e) {
     commonFunctions.setUpAutoStart(1)
     errorInfo('执行异常, 1分钟后重新开始' + e)
-  } finally {
-    runningQueueDispatcher.removeRunningTask(true)
-    // 30秒后关闭，防止立即停止
-    setTimeout(() => { exit() }, 1000 * 30)
   }
 }
+
+events.removeAllListeners()
+events.recycle()
+runningQueueDispatcher.removeRunningTask(true)
+// 30秒后关闭，防止立即停止
+setTimeout(() => { exit() }, 1000 * 30)

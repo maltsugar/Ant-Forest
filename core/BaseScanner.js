@@ -2,14 +2,14 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-18 14:17:09
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-02-24 09:29:12
+ * @Last Modified time: 2020-04-27 00:32:19
  * @Description: 排行榜扫描基类
  */
-
-let _widgetUtils = typeof WidgetUtils === 'undefined' ? require('../lib/WidgetUtils.js') : WidgetUtils
-let automator = require('../lib/Automator.js')
-let _commonFunctions = typeof commonFunctions === 'undefined' ? require('../lib/CommonFunction.js') : commonFunctions
-let _config = typeof config === 'undefined' ? require('../config.js').config : config
+let { config: _config } = require('../config.js')(runtime, this)
+let singletoneRequire = require('../lib/SingletonRequirer.js')(runtime, this)
+let _widgetUtils = singletoneRequire('WidgetUtils')
+let automator = singletoneRequire('Automator')
+let _commonFunctions = singletoneRequire('CommonFunction')
 
 const BaseScanner = function () {
   this.increased_energy = 0
@@ -40,7 +40,7 @@ const BaseScanner = function () {
    */
   this.collectBallEnergy = function (energy_ball, isDesc) {
     if (_config.skip_five && !isOwn) {
-      let regexCheck = /(\d+)克/
+      let regexCheck = /(\d+)/
       let execResult
       if (isDesc) {
         debugInfo('获取能量球desc数据')
@@ -63,8 +63,8 @@ const BaseScanner = function () {
   }
 
   // 收取能量
-  this.collectEnergy = function () {
-    let ballCheckContainer = _widgetUtils.widgetGetAll(_config.collectable_energy_ball_content, null, true)
+  this.collectEnergy = function (isHelp) {
+    let ballCheckContainer = _widgetUtils.widgetGetAll(_config.collectable_energy_ball_content, isHelp ? 200 : 1000, true)
     if (ballCheckContainer !== null) {
       debugInfo('能量球存在')
       let that = this
@@ -80,7 +80,7 @@ const BaseScanner = function () {
   // 收取能量同时帮好友收取
   this.collectAndHelp = function (needHelp) {
     // 收取好友能量
-    this.collectEnergy()
+    this.collectEnergy(needHelp)
     let screen = _commonFunctions.checkCaptureScreenPermission()
     if (!screen) {
       warnInfo('获取截图失败，无法帮助收取能量')
