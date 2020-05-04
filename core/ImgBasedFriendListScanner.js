@@ -2,7 +2,7 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-11-11 09:17:29
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-02-24 09:27:48
+ * @Last Modified time: 2020-05-01 00:49:35
  * @Description: 基于图像识别控件信息
  */
 importClass(com.tony.BitCheck)
@@ -10,15 +10,16 @@ importClass(java.util.concurrent.LinkedBlockingQueue)
 importClass(java.util.concurrent.ThreadPoolExecutor)
 importClass(java.util.concurrent.TimeUnit)
 importClass(java.util.concurrent.CountDownLatch)
-let { config: _config } = require('../config.js')(runtime, this)
-let singletoneRequire = require('../lib/SingletonRequirer.js')(runtime, this)
-let _widgetUtils = singletoneRequire('WidgetUtils')
-let automator = singletoneRequire('Automator')
-let _commonFunctions = singletoneRequire('CommonFunction')
+let {
+  config: _config
+} = require('../config.js')(runtime, this)
+let singletonRequire = require('../lib/SingletonRequirer.js')(runtime, this)
+let _widgetUtils = singletonRequire('WidgetUtils')
+let automator = singletonRequire('Automator')
+let _commonFunctions = singletonRequire('CommonFunction')
 let BaiduOcrUtil = require('../lib/BaiduOcrUtil.js')
 
 let BaseScanner = require('./BaseScanner.js')
-const _package_name = 'com.eg.android.AlipayGphone'
 
 const Stack = function () {
   this.size = 0
@@ -65,7 +66,7 @@ const ANALYZE_WIDTH = parseInt(200 * SCALE_RATE)
 const BIT_MAX_VAL = _config.device_height << 8 | ANALYZE_WIDTH
 debugInfo(['初始化 BitMap最大值为:{} 小手分析宽度:{} 缩放比例：{}', BIT_MAX_VAL, ANALYZE_WIDTH, SCALE_RATE])
 // 计算中心点
-function ColorRegionCenterCalculator (img, point, threshold) {
+function ColorRegionCenterCalculator(img, point, threshold) {
   // Java打包的位运算方式
   this.bitChecker = new BitCheck(BIT_MAX_VAL)
 
@@ -298,8 +299,7 @@ const ImgBasedFriendListScanner = function () {
                 isHelp: true,
                 point: helpPoint
               }
-            })
-          )
+            }))
         }
       }
       let collectPoints = this.sortAndReduce(this.detectCollect(screenForDetectCollect))
@@ -310,8 +310,7 @@ const ImgBasedFriendListScanner = function () {
               isHelp: false,
               point: collectPoint
             }
-          })
-        )
+          }))
       }
       countdown.summary('获取可帮助和可能可收取的点')
       if (waitForCheckPoints.length > 0) {
@@ -342,7 +341,10 @@ const ImgBasedFriendListScanner = function () {
               if (point.same < (_config.finger_img_pixels || 2300)) {
                 debugInfo('可能可收取位置：' + JSON.stringify(point))
                 listWriteLock.lock()
-                collectOrHelpList.push({ point: point, isHelp: false })
+                collectOrHelpList.push({
+                  point: point,
+                  isHelp: false
+                })
                 countdownLatch.countDown()
                 listWriteLock.unlock()
               } else {
@@ -580,7 +582,6 @@ ImgBasedFriendListScanner.prototype.returnToListAndCheck = function () {
 }
 
 ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
-  let rentery = false
   if (!obj.protect) {
     //automator.click(obj.target.centerX(), obj.target.centerY())
     debugInfo(['等待进入好友主页, 位置：「{}, {}」设备宽高：[{}, {}]', obj.point.x, obj.point.y, _config.device_width, _config.device_height])
@@ -639,85 +640,7 @@ ImgBasedFriendListScanner.prototype.collectTargetFriend = function (obj) {
     if (skip) {
       return this.returnToListAndCheck()
     }
-    debugInfo(['准备开始收取好友：「{}」', obj.name])
-    let temp = this.protectDetect(_package_name, obj.name)
-    let preGot
-    let preE
-    try {
-      preGot = _widgetUtils.getYouCollectEnergy() || 0
-      preE = _widgetUtils.getFriendEnergy()
-    } catch (e) { 
-      errorInfo("[" + obj.name + "]获取收集前能量异常" + e) 
-    }
-    if (_config.help_friend) {
-      rentery = this.collectAndHelp(obj.isHelp)
-      obj.renteryCount ++
-    } else {
-      this.collectEnergy()
-    }
-    try {
-      sleep(300)
-      let postGet = _widgetUtils.getYouCollectEnergy() || 0
-      let postE = _widgetUtils.getFriendEnergy()
-      if (!obj.isHelp && postGet !== null && preGot !== null) {
-        let gotEnergy = postGet - preGot
-        debugInfo("开始收集前:" + preGot + "收集后:" + postGet)
-        if (gotEnergy) {
-          let needWaterback = _commonFunctions.recordFriendCollectInfo({
-            friendName: obj.name,
-            friendEnergy: postE,
-            postCollect: postGet,
-            preCollect: preGot,
-            helpCollect: 0
-          })
-          try {
-            if (needWaterback) {
-              _widgetUtils.wateringFriends()
-              gotEnergy -= 10
-            }
-          } catch (e) {
-            errorInfo('收取[' + obj.name + ']' + gotEnergy + 'g 大于阈值:' + _config.wateringThreshold + ' 回馈浇水失败 ' + e)
-          }
-          logInfo([
-            "收取好友:{} 能量 {}g {}",
-            obj.name, gotEnergy, (needWaterback ? '其中浇水10g' : '')
-          ])
-          this.showCollectSummaryFloaty(gotEnergy)
-        } else {
-          debugInfo("收取好友:" + obj.name + " 能量 " + gotEnergy + "g")
-        }
-      } else if (obj.isHelp && postE !== null && preE !== null) {
-        let gotEnergy = postE - preE
-        debugInfo("开始帮助前:" + preE + " 帮助后:" + postE)
-        if (gotEnergy) {
-          logInfo("帮助好友:" + obj.name + " 回收能量 " + gotEnergy + "g")
-          _commonFunctions.recordFriendCollectInfo({
-            friendName: obj.name,
-            friendEnergy: postE,
-            postCollect: postGet,
-            preCollect: preGot,
-            helpCollect: gotEnergy
-          })
-        } else {
-          logInfo("帮助好友:" + obj.name + " 回收能量 " + gotEnergy + "g")
-        }
-      }
-    } catch (e) {
-      errorInfo("[" + obj.name + "]获取收取后能量异常" + e)
-    }
-    temp.interrupt()
-    debugInfo('好友能量收取完毕, 回到好友排行榜')
-    if (false === this.returnToListAndCheck()) {
-      return false
-    }
-    if (rentery && obj.renteryCount < 4) {
-      // 满足重试条件（在BaseScanner里有条件）， 且重试次数小于6. （防止有好友送的能量球不能收取，卡循环）
-      if (obj.renteryCount > 1) {
-        toastLog('可能遇到无法收取的能量球，重试3次后跳过，当前: 第' + obj.renteryCount + '次')
-      }
-      obj.isHelp = false
-      return this.collectTargetFriend(obj)
-    }
+    return this.doCollectTargetFriend(obj)
   }
   return true
 }
@@ -747,7 +670,7 @@ ImgBasedFriendListScanner.prototype.checkRunningCountdown = function (countingDo
   }
 }
 
-function Countdown () {
+function Countdown() {
   this.start = new Date().getTime()
   this.getCost = function () {
     return new Date().getTime() - this.start

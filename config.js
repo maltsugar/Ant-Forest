@@ -2,21 +2,13 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-09 20:42:08
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-04-27 14:44:26
+ * @Last Modified time: 2020-05-01 12:08:13
  * @Description: 
  */
 'ui';
 
 let currentEngine = engines.myEngine().getSource() + ''
 let isRunningMode = currentEngine.endsWith('/config.js') && typeof module === 'undefined'
-
-
-importClass(android.text.TextWatcher)
-importClass(android.view.View)
-importClass(android.view.MotionEvent)
-importClass(java.util.concurrent.LinkedBlockingQueue)
-importClass(java.util.concurrent.ThreadPoolExecutor)
-importClass(java.util.concurrent.TimeUnit)
 
 let default_config = {
   password: '',
@@ -43,6 +35,8 @@ let default_config = {
   show_debug_log: true,
   show_engine_id: false,
   develop_mode: false,
+  // 开发用开关，截图并保存一些图片
+  cutAndSaveCountdown: false,
   auto_lock: false,
   lock_x: 150,
   lock_y: 970,
@@ -66,12 +60,10 @@ let default_config = {
   finger_img_pixels: 2300,
   thread_pool_size: 4,
   thread_pool_max_size: 8,
-  thread_pool_queue_size: 256,
+  thread_pool_queue_size: 16,
   thread_pool_waiting_time: 5,
   white_list: [],
 
-  // 只在AutoJS中能打开，定时不能打开时 尝试开启这个 设为true
-  fuck_miui11: false,
   // 单脚本模式 是否只运行一个脚本 不会同时使用其他的 开启单脚本模式 会取消任务队列的功能。
   // 比如同时使用蚂蚁庄园 则保持默认 false 否则设置为true 无视其他运行中的脚本
   single_script: false,
@@ -97,6 +89,8 @@ let default_config = {
   wateringBack: true,
   // 浇水阈值40克
   wateringThreshold: 40,
+  // 浇水数量
+  targetWateringAmount: 10,
   // 配置不浇水的黑名单
   wateringBlackList: [],
   // 延迟启动时延 5秒 悬浮窗中进行的倒计时时间
@@ -114,8 +108,8 @@ let default_config = {
   // 秘钥
   secretKey: '',
 
-  home_ui_content: '背包|通知|攻略|种树',
-  friend_home_ui_content: '浇水|发消息',
+  home_ui_content: '查看更多动态.*',
+  friend_home_ui_content: '你收取TA',
   // 废弃
   friend_list_ui_content: '(周|总)排行榜',
   // 用于判断是否在好友排行榜
@@ -133,7 +127,9 @@ let default_config = {
   rank_check_width: 700,
   rank_check_height: 135,
   device_width: device.width,
-  device_height: device.height
+  device_height: device.height,
+  // 尝试全局点击收集能量，能量球控件无法获取时使用 默认开启
+  try_collect_by_multi_touch: true
 }
 let CONFIG_STORAGE_NAME = 'ant_forest_config_fork_version'
 let PROJECT_NAME = '蚂蚁森林能量收集'
@@ -168,6 +164,14 @@ if (!isRunningMode) {
     return scope.config_instance
   }
 } else {
+
+  importClass(android.text.TextWatcher)
+  importClass(android.widget.AdapterView)
+  importClass(android.view.View)
+  importClass(android.view.MotionEvent)
+  importClass(java.util.concurrent.LinkedBlockingQueue)
+  importClass(java.util.concurrent.ThreadPoolExecutor)
+  importClass(java.util.concurrent.TimeUnit)
 
   let threadPool = new ThreadPoolExecutor(4, 4, 60, TimeUnit.SECONDS, new LinkedBlockingQueue(16))
   let floatyWindow = null
@@ -305,6 +309,8 @@ if (!isRunningMode) {
     ui.saveLogFileChkBox.setChecked(config.saveLogFile)
     ui.showEngineIdChkBox.setChecked(config.show_engine_id)
     ui.developModeChkBox.setChecked(config.develop_mode)
+    ui.cutAndSaveCountdownChkBox.setChecked(config.cutAndSaveCountdown)
+    ui.developModeContainer.setVisibility(config.develop_mode ? View.VISIBLE : View.GONE)
     ui.fileSizeInpt.text(config.back_size + '')
     ui.fileSizeContainer.setVisibility(config.saveLogFile ? View.VISIBLE : View.INVISIBLE)
 
@@ -347,8 +353,9 @@ if (!isRunningMode) {
     ui.wateringThresholdInpt.text(config.wateringThreshold + '')
     ui.wateringThresholdContainer.setVisibility(config.wateringBack ? View.VISIBLE : View.INVISIBLE)
     ui.wateringBlackListContainer.setVisibility(config.wateringBack ? View.VISIBLE : View.GONE)
+    ui.wateringBackAmountSpinner.setSelection([5, 10, 18].indexOf(config.targetWateringAmount))
 
-    ui.developModeChkBox.setChecked(config.develop_mode)
+    ui.tryCollectByMultiTouchChkBox.setChecked(config.try_collect_by_multi_touch)
     setScrollDownUiVal()
     setOcrUiVal()
 
@@ -424,6 +431,15 @@ if (!isRunningMode) {
       beforeTextChanged: function (s) { }
       ,
       afterTextChanged: function (s) { }
+    })
+  }
+
+  let SpinnerItemSelectedListenerBuilder = function (selectedCallback) {
+    return new AdapterView.OnItemSelectedListener({
+      onItemSelected: function (parentView, selectedItemView, position, id) {
+        selectedCallback(position)
+      },
+      onNothingSelected: function (parentView) {}
     })
   }
 
@@ -541,10 +557,15 @@ if (!isRunningMode) {
                     <text text="延迟启动时间（秒）:" />
                     <input layout_weight="70" inputType="number" id="delayStartTimeInpt" layout_weight="70" />
                   </horizontal>
+                  <checkbox id="developModeChkBox" text="是否启用开发模式" />
+                  <vertical id="developModeContainer" gravity="center">
+                    <text text="脚本执行时保存图片，未启用开发模式时依旧有效:" margin="5 0" textSize="14sp"/>
+                    <checkbox id="cutAndSaveCountdownChkBox" text="是否保存开发用的图片" />
+                  </vertical>
+                  <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                   {/* 是否显示debug日志 */}
                   <checkbox id="showDebugLogChkBox" text="是否显示debug日志" />
                   <checkbox id="showEngineIdChkBox" text="是否在控制台中显示脚本引擎id" />
-                  <checkbox id="developModeChkBox" text="是否启用开发模式" />
                   <horizontal gravity="center">
                     <checkbox id="saveLogFileChkBox" text="是否保存日志到文件" />
                     <horizontal padding="10 0" id="fileSizeContainer" gravity="center" layout_weight="75">
@@ -612,6 +633,8 @@ if (!isRunningMode) {
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                   {/* 基于图像分析 */}
                   <checkbox id="autoSetImgOrWidgetChkBox" text="自动判断基于图像还是控件分析" />
+                  <text text="当可收取能量球控件无法获取时开启区域点击，后期会开发基于图像分析的方式" textSize="9sp" />
+                  <checkbox id="tryCollectByMultiTouchChkBox" text="是否尝试区域点击来收取能量" />
                   <checkbox id="baseOnImageChkBox" text="基于图像分析" />
                   <vertical id="baseOnImageContainer">
                     <checkbox id="checkBottomBaseImgChkBox" text="基于图像判断列表底部" />
@@ -630,7 +653,8 @@ if (!isRunningMode) {
                         <input layout_weight="70" inputType="number" id="friendListScrollTimeInpt" layout_weight="70" />
                       </horizontal>
                     </vertical>
-                    <text text="可收取小手指的绿色像素点个数，1080P时小于2300判定为可收取，其他分辨率需要自行修改=2300*缩小比例^2" textSize="10sp" />
+                    <text text="可收取小手指的绿色像素点个数，1080P时小于2300判定为可收取，其他分辨率需要自行修改=2300*缩放比例^2" textSize="10sp" />
+                    <text text="如果还是不行，请分析日志进行调整，日志中会打印同色点个数" textSize="10sp" />
                     <horizontal gravity="center" >
                       <text text="小手指像素点个数:" />
                       <input layout_weight="70" inputType="number" id="fingerImgPixelsInpt" layout_weight="70" />
@@ -659,6 +683,7 @@ if (!isRunningMode) {
                   <vertical id="useOcrParentContainer">
                     <checkbox id="useOcrChkBox" text="是否启用百度的OCR识别倒计时" />
                     <vertical id="useOcrContainer">
+                      <text text="缓存数据仅仅是像素点个数和倒计时的键值对，所以可能返回的是错误的值" textSize="10sp" />
                       <checkbox id="ocrUseCacheChkBox" text="是否从缓存中获取OCR识别的倒计时，非精确值" />
                       <checkbox id="saveBase64ImgInfoChkBox" text="是否记录图片Base64数据到日志" />
                       <text id="ocrInvokeCount" textSize="12sp" />
@@ -712,6 +737,8 @@ if (!isRunningMode) {
                       <text text="浇水阈值" />
                       <input layout_weight="70" inputType="number" id="wateringThresholdInpt" />
                     </horizontal>
+                    <text text = "浇水数量" textSize="14sp" />
+                    <spinner id="wateringBackAmountSpinner" entries="5|10|18"/>
                   </horizontal>
                   {/* 浇水黑名单 */}
                   <vertical w="*" gravity="left" layout_gravity="left" margin="10" id="wateringBlackListContainer">
@@ -1294,6 +1321,11 @@ if (!isRunningMode) {
 
     ui.developModeChkBox.on('click', () => {
       config.develop_mode = ui.developModeChkBox.isChecked()
+      ui.developModeContainer.setVisibility(config.develop_mode ? View.VISIBLE : View.GONE)
+    })
+
+    ui.cutAndSaveCountdownChkBox.on('click', () => {
+      config.cutAndSaveCountdown = ui.cutAndSaveCountdownChkBox.isChecked()
     })
 
     ui.saveLogFileChkBox.on('click', () => {
@@ -1435,6 +1467,11 @@ if (!isRunningMode) {
       }
       setScrollDownUiVal()
     })
+
+    ui.tryCollectByMultiTouchChkBox.on('click', () => {
+      config.try_collect_by_multi_touch = ui.tryCollectByMultiTouchChkBox.isChecked()
+    })
+
     ui.baseOnImageChkBox.on('click', () => {
       config.base_on_image = ui.baseOnImageChkBox.isChecked()
       if (config.base_on_image) {
@@ -1510,6 +1547,10 @@ if (!isRunningMode) {
       ui.wateringThresholdContainer.setVisibility(config.wateringBack ? View.VISIBLE : View.INVISIBLE)
       ui.wateringBlackListContainer.setVisibility(config.wateringBack ? View.VISIBLE : View.GONE)
     })
+
+    ui.wateringBackAmountSpinner.setOnItemSelectedListener(
+      SpinnerItemSelectedListenerBuilder(position => config.targetWateringAmount = [5, 10, 18][position])
+    )
 
     ui.wateringThresholdInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.wateringThreshold = parseInt(text) })

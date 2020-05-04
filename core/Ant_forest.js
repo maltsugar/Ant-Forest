@@ -1,24 +1,26 @@
 /*
  * @Author: NickHopps
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-04-25 19:12:10
+ * @Last Modified time: 2020-05-01 17:21:00
  * @Description: 蚂蚁森林操作集
  */
 let { config: _config } = require('../config.js')(runtime, this)
-let singletoneRequire = require('../lib/SingletonRequirer.js')(runtime, this)
-let _widgetUtils = singletoneRequire('WidgetUtils')
-let automator = singletoneRequire('Automator')
-let _commonFunctions = singletoneRequire('CommonFunction')
-let _runningQueueDispatcher = singletoneRequire('RunningQueueDispatcher')
-let alipayUnlocker = singletoneRequire('AlipayUnlocker')
+let singletonRequire = require('../lib/SingletonRequirer.js')(runtime, this)
+let _widgetUtils = singletonRequire('WidgetUtils')
+let automator = singletonRequire('Automator')
+let _commonFunctions = singletonRequire('CommonFunction')
+let _runningQueueDispatcher = singletonRequire('RunningQueueDispatcher')
+let alipayUnlocker = singletonRequire('AlipayUnlocker')
 let FriendListScanner = require('./FriendListScanner.js')
 let ImgBasedFriendListScanner = null
 if (_config.base_on_image) {
   ImgBasedFriendListScanner = require('./ImgBasedFriendListScanner.js')
 }
+let BaseScanner = require('./BaseScanner.js')
 
 function Ant_forest () {
   const _package_name = 'com.eg.android.AlipayGphone'
+  let _base_scanner = new BaseScanner()
 
   let _pre_energy = 0, // 记录收取前能量值
     _post_energy = 0, // 记录收取后能量值
@@ -218,9 +220,9 @@ function Ant_forest () {
           return obj.bounds().height() / obj.bounds().width() > 1.05
         })
     }
+    let temp = []
     if (target && target.exists()) {
       let ball = target.untilFind()
-      let temp = []
       debugInfo('待收取球数' + ball.length)
       let toasts = getToastAsync(_package_name, ball.length >= 2 ? 2 : ball.length, function () {
         let screen = _commonFunctions.checkCaptureScreenPermission()
@@ -257,6 +259,21 @@ function Ant_forest () {
     } else {
       _min_countdown = null
       logInfo('无可收取能量')
+      if (_config.try_collect_by_multi_touch) {
+        let toasts = getToastAsync(_package_name, 1, function () {
+          _base_scanner.multiTouchToCollect()
+          return 1
+        })
+        toasts.forEach(function (toast) {
+          let countdown = toast.match(/\d+/g)
+          if (countdown !== null && countdown.length >= 2) {
+            temp.push(countdown[0] * 60 - -countdown[1])
+          } else {
+            errorInfo('获取倒计时错误：' + countdown)
+          }
+        })
+        _min_countdown = Math.min.apply(null, temp)
+      }
     }
     _timestamp = new Date()
   }
@@ -786,12 +803,12 @@ function Ant_forest () {
             _has_next = true
             _re_try = 0
           }
-          // 当前没有遗漏 准备结束当前循环
-          if (!_lost_someone) {
-            this.endLoop()
-            if (_has_next === false || _re_try > 5) {
-              break
-            }
+        }
+        // 当前没有遗漏 准备结束当前循环
+        if (!_lost_someone) {
+          this.endLoop()
+          if (_has_next === false || _re_try > 5) {
+            break
           }
         }
         logInfo('========本轮结束========')
