@@ -2,7 +2,7 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-18 14:17:09
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-05-01 18:05:42
+ * @Last Modified time: 2020-05-09 09:35:32
  * @Description: 排行榜扫描基类
  */
 let { config: _config } = require('../config.js')(runtime, this)
@@ -17,6 +17,15 @@ let { debugInfo, logInfo, errorInfo, warnInfo, infoLog } = singletonRequire('Log
 let _package_name = 'com.eg.android.AlipayGphone'
 
 const BaseScanner = function () {
+
+  let SCALE_RATE = _config.device_width / 1080
+  let detectRegion = [
+    _config.tree_collect_left, _config.tree_collect_top,
+    _config.tree_collect_width, _config.tree_collect_height
+  ]
+  let GAP = parseInt(detectRegion[2] / 6)
+
+
   this.increased_energy = 0
   this.current_time = 0
   this.collect_any = false
@@ -68,10 +77,14 @@ const BaseScanner = function () {
 
   // 收取能量
   this.collectEnergy = function (isHelp) {
+    if (_config.direct_use_img_collect_and_help) {
+      this.checkAndCollectByImg()
+      return
+    }
     let ballCheckContainer = _widgetUtils.widgetGetAll(_config.collectable_energy_ball_content, isHelp ? 200 : 500, true)
     if (ballCheckContainer !== null) {
       debugInfo(['可收取能量球个数：「{}」', ballCheckContainer.target.length])
-      if (_config.cutAndSaveCountdown) {
+      if (_config.cutAndSaveTreeCollect) {
         // 保存图像数据 方便后续开发
         let screen = _commonFunctions.checkCaptureScreenPermission()
         if (screen) {
@@ -100,13 +113,12 @@ const BaseScanner = function () {
   }
 
   this.defaultMultiTouch = function () {
-    let scaleRate = _config.device_width / 1080
     let y = 700
     // 模拟一个梯形点击区域
     for (let x = 200; x <= 900; x += 100) {
       let px = x
       let py = x < 550 ? y - (0.5 * x - 150) : y - (-0.5 * x + 400)
-      automator.click(parseInt(px * scaleRate), parseInt(py * scaleRate))
+      automator.click(parseInt(px * SCALE_RATE), parseInt(py * SCALE_RATE))
       sleep(15)
     }
   }
@@ -121,10 +133,159 @@ const BaseScanner = function () {
     }
   }
 
+
+  this.checkAndCollectByImg = function (isOwn) {
+    isOwn = isOwn || false
+    let start = new Date().getTime()
+    let allPoints = this.checkByImg('#c8c8c8', '#cacaca', false)
+    if (!isOwn) {
+      // 不需要帮助好友时，过滤帮助收取的点
+      if (!_config.help_friend && allPoints.length > 0) {
+        let start = new Date().getTime()
+        let screen = _commonFunctions.checkCaptureScreenPermission()
+        if (screen) {
+          let forCheckImg = images.copy(screen)
+          allPoints = allPoints.filter(point => {
+            let region = [detectRegion[0] + point.x, detectRegion[1] + point.y, 50, 200]
+            for (let i = 0; i < _config.helpBallColors.length; i++) {
+              let color = _config.helpBallColors[i]
+              if (images.findColor(forCheckImg, color, { region: region, threshold: _config.color_offset })) {
+                return false
+              }
+              debugInfo(['{} 未找到匹配的颜色：{}', region, color])
+            }
+            return true
+          })
+          debugInfo(['过滤可帮助能量球后：「{}」过滤耗时：{}ms', JSON.stringify(allPoints), new Date().getTime() - start])
+          forCheckImg.recycle()
+          screen.recycle()
+        }
+      } else if (_config.help_friend) {
+        let firstCheckPoints = this.checkByImg('#b5b5b5', '#d6d6d6', true)
+        // 延迟一段时间二次检验
+        sleep(250)
+        let secondCheckPoints = this.checkByImg('#b5b5b5', '#d6d6d6', true)
+        allPoints = allPoints.concat(firstCheckPoints.concat(secondCheckPoints))
+      }
+    } else {
+      debugInfo('收取自己的能量球，跳过帮收能量球的校验')
+      // TODO 识别好友浇水能量球，暂时懒得实现 手动收呗
+    }
+    debugInfo(['得到的点集合：「{}」', JSON.stringify(allPoints)])
+    // 整合校验的点，移除距离较近的，然后进行点击
+    let clickPoints = []
+    let lastPx = -200
+    let lastPy = -200
+    if (allPoints.length > 0) {
+      allPoints.forEach(p => {
+        if (this.getDistance(p, lastPx, lastPy) >= 100) {
+          clickPoints.push(p)
+          lastPx = p.x
+          lastPy = p.y
+        }
+      })
+      debugInfo(['过滤后的点集合：「{}」', JSON.stringify(clickPoints)])
+      this.clickCheckPoints(clickPoints)
+    }
+    debugInfo(['判断可收集能量球信息总耗时：{}ms', new Date().getTime() - start])
+  }
+
+  this.getDistance = function (p, lpx, lpy) {
+    return Math.sqrt(Math.pow(p.x - lpx, 2) + Math.pow(p.y - lpy, 2))
+  }
+
+  this.checkAndClickByImg = function (lowColor, highColor, isHelp) {
+    let clickPoints = this.checkByImg(lowColor, highColor, isHelp)
+    this.clickCheckPoints(clickPoints)
+  }
+
+  this.clickCheckPoints = function (clickPoints) {
+    if (clickPoints.length > 0) {
+      clickPoints.forEach(p => {
+        automator.click(p.x + detectRegion[0], p.y + detectRegion[1])
+        sleep(100)
+      })
+      // 点击后加一定延迟 避免过快导致出问题
+      sleep(100)
+    }
+  }
+
+  this.checkByImg = function (lowColor, highColor, isHelp) {
+    let screen = _commonFunctions.checkCaptureScreenPermission()
+    if (screen) {
+      let start = new Date().getTime()
+      let copyImg = images.grayscale(screen)
+      let tmpImg = images.inRange(copyImg, lowColor, highColor)
+      let intervalImg = images.medianBlur(tmpImg, 5)
+      tmpImg.recycle()
+      // 切割检测区域
+      intervalImg = images.clip(intervalImg, detectRegion[0], detectRegion[1], detectRegion[2], detectRegion[3])
+
+      let clickPoints = []
+      let lastPx = -GAP
+      let lastPy = -GAP
+      let step = parseInt(75 * SCALE_RATE)
+      let o = step * 3
+
+      for (let x = 0; x <= detectRegion[2] - GAP; x += GAP) {
+        let offset = x == 3 * GAP ? o : Math.abs(o -= step)
+        if (offset == step) {
+          offset = parseInt(90 * SCALE_RATE)
+        }
+        let checkPoints = []
+        for (let x = -parseInt(25 * SCALE_RATE); x <= parseInt(25 * SCALE_RATE); x += 2) {
+          checkPoints.push([x, 0, '#ffffff'])
+        }
+        if (isHelp) {
+          for (let y = 0; y <= parseInt(25 * SCALE_RATE); y += 2) {
+            checkPoints.push([0, y, '#ffffff'])
+          }
+        }
+        let p = images.findMultiColors(
+          intervalImg, "#ffffff",
+          checkPoints,
+          {
+            region: [
+              x, offset,
+              GAP, detectRegion[3] - offset
+            ]
+          }
+        )
+        if (p && this.getDistance(p, lastPx, lastPy) >= 100) {
+          clickPoints.push(p)
+          lastPx = p.x
+          lastPy = p.y
+        }
+      }
+      if (intervalImg !== null) {
+        intervalImg.recycle()
+      }
+      screen.recycle()
+      copyImg.recycle()
+      debugInfo([
+        '{} 点个数：「{}」列表：{} 耗时:{}ms',
+        (isHelp ? '可帮助' : '可收取'), clickPoints.length, JSON.stringify(clickPoints), new Date().getTime() - start
+      ])
+      return clickPoints
+    }
+  }
+
   // 收取能量同时帮好友收取
   this.collectAndHelp = function (needHelp) {
     // 收取好友能量
     this.collectEnergy(needHelp)
+    if (_config.direct_use_img_collect_and_help) {
+      if (needHelp) {
+        // 因为无法判断剩余多少个能量球，当需要帮助之后返回true 重新进入，下次调用时传递needHelp为false即可
+        return true
+      } else {
+        return
+      }
+    }
+    if (_config.try_collect_by_multi_touch) {
+      // 多点点击方式直接就帮助了 不再执行后续操作 后续判断是否有帮助来确定是否需要重进
+      return
+    }
     let screen = _commonFunctions.checkCaptureScreenPermission()
     if (!screen) {
       warnInfo('获取截图失败，无法帮助收取能量')
@@ -304,6 +465,10 @@ const BaseScanner = function () {
     debugInfo(['准备开始收取好友：「{}」', obj.name])
     let temp = this.protectDetect(_package_name, obj.name)
     let preGot, preE, rentery = false
+    let screen = null
+    if (_config.cutAndSaveTreeCollect) {
+      screen = images.copy(_commonFunctions.checkCaptureScreenPermission(false))
+    }
     try {
       preGot = _widgetUtils.getYouCollectEnergy() || 0
       preE = _widgetUtils.getFriendEnergy()
@@ -333,7 +498,7 @@ const BaseScanner = function () {
           try {
             if (needWaterback) {
               _widgetUtils.wateringFriends()
-              gotEnergyAfterWater = _widgetUtils.getYouCollectEnergy() - preGet
+              gotEnergyAfterWater = _widgetUtils.getYouCollectEnergy() - preGot
             }
           } catch (e) {
             errorInfo('收取[' + obj.name + ']' + gotEnergy + 'g 大于阈值:' + _config.wateringThreshold + ' 回馈浇水失败 ' + e)
@@ -343,31 +508,50 @@ const BaseScanner = function () {
             obj.name, gotEnergyAfterWater, (needWaterback ? '浇水' + (gotEnergy - gotEnergyAfterWater) + 'g' : '')
           ])
           this.showCollectSummaryFloaty(gotEnergy)
+          if (_config.cutAndSaveTreeCollect && screen) {
+            let savePath = FileUtils.getCurrentWorkPath() + '/resources/tree_collect/'
+              + 'unknow_collected_' + gotEnergyAfterWater + '_' + (Math.random() * 899 + 100).toFixed(0) + '.png'
+            files.ensureDir(savePath)
+            images.save(screen, savePath)
+            debugForDev(['保存可收取能量球图片：「{}」', savePath])
+          }
         } else {
           debugInfo("收取好友:" + obj.name + " 能量 " + gotEnergy + "g")
         }
       } else if (obj.isHelp && postE !== null && preE !== null) {
-        let gotEnergy = postE - preE
+        let friendGrowEnergy = postE - preE
         debugInfo("开始帮助前:" + preE + " 帮助后:" + postE)
-        if (gotEnergy > 0) {
-          logInfo("帮助好友:" + obj.name + " 回收能量 " + gotEnergy + "g")
+        if (friendGrowEnergy > 0) {
+          logInfo("帮助好友:" + obj.name + " 回收能量 " + friendGrowEnergy + "g")
           _commonFunctions.recordFriendCollectInfo({
             friendName: obj.name,
             friendEnergy: postE,
             postCollect: postGet,
             preCollect: preGot,
-            helpCollect: gotEnergy
+            helpCollect: friendGrowEnergy
           })
-          if (_config.try_collect_by_multi_touch) {
+          if (_config.try_collect_by_multi_touch || _config.direct_use_img_collect_and_help) {
             // 如果是可帮助 且 无法获取控件信息的，以帮助收取的重新进入判断一次
+            debugInfo('帮助收取后需要再次进入好友页面检测')
             rentery = true
+          }
+          if (_config.cutAndSaveTreeCollect && screen) {
+            let savePath = FileUtils.getCurrentWorkPath() + '/resources/tree_collect/'
+              + 'unknow_helped_' + friendGrowEnergy + '_' + (Math.random() * 899 + 100).toFixed(0) + '.png'
+            files.ensureDir(savePath)
+            images.save(screen, savePath)
+            debugForDev(['保存可帮助能量球图片：「{}」', savePath])
           }
         }
       }
     } catch (e) {
       errorInfo("[" + obj.name + "]获取收取后能量异常" + e)
+    } finally {
+      if (screen) {
+        screen.recycle()
+      }
     }
-    
+
     temp.interrupt()
     debugInfo('好友能量收取完毕, 回到好友排行榜')
     if (false === this.returnToListAndCheck()) {

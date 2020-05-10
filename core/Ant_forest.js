@@ -1,7 +1,7 @@
 /*
  * @Author: NickHopps
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-05-01 17:21:00
+ * @Last Modified time: 2020-05-09 09:58:15
  * @Description: 蚂蚁森林操作集
  */
 let { config: _config } = require('../config.js')(runtime, this)
@@ -25,14 +25,14 @@ function Ant_forest () {
   let _pre_energy = 0, // 记录收取前能量值
     _post_energy = 0, // 记录收取后能量值
     _timestamp = 0, // 记录获取自身能量倒计时
-    _min_countdown = 0, // 最小可收取倒计时
+    _min_countdown = null, // 最小可收取倒计时
     _current_time = 0, // 当前收集次数
     _fisrt_running = true, // 是否第一次进入蚂蚁森林
     _has_next = true, // 是否下一次运行
     _collect_any = false, // 收集过能量
     _re_try = 0,
-    _lost_someone = false // 是否漏收,
-  _friends_min_countdown = 0
+    _lost_someone = false, // 是否漏收,
+    _friends_min_countdown = null
   /***********************
    * 综合操作
    ***********************/
@@ -256,24 +256,6 @@ function Ant_forest () {
         }
       })
       _min_countdown = Math.min.apply(null, temp)
-    } else {
-      _min_countdown = null
-      logInfo('无可收取能量')
-      if (_config.try_collect_by_multi_touch) {
-        let toasts = getToastAsync(_package_name, 1, function () {
-          _base_scanner.multiTouchToCollect()
-          return 1
-        })
-        toasts.forEach(function (toast) {
-          let countdown = toast.match(/\d+/g)
-          if (countdown !== null && countdown.length >= 2) {
-            temp.push(countdown[0] * 60 - -countdown[1])
-          } else {
-            errorInfo('获取倒计时错误：' + countdown)
-          }
-        })
-        _min_countdown = Math.min.apply(null, temp)
-      }
     }
     _timestamp = new Date()
   }
@@ -304,7 +286,10 @@ function Ant_forest () {
       debugInfo('重新获取倒计时经过了：[' + passedTime + ']分，最终记录上轮倒计时：[' + lastMin + ']分')
       lastMin >= 0 ? temp.push(lastMin) : temp.push(0)
     }
-    let friCountDownContainer = _widgetUtils.widgetGetAll('\\d+’', null, true)
+    // 基于图像处理且已开启OCR 倒计时已通过ocr获取，尝试一秒获取控件倒计时 否则按配置的时间获取
+    // 后期基于图像分析有可能直接放弃控件获取
+    let existTimeout = _config.base_on_image && _config.useOcr ? 1000 : null
+    let friCountDownContainer = _widgetUtils.widgetGetAll('\\d+’', existTimeout, true)
     let peekCountdownContainer = function (container) {
       if (container) {
         return _commonFunctions.formatString('倒计时数据总长度：{} 文本属性来自[{}]', container.target.length, (container.isDesc ? 'desc' : 'text'))
@@ -358,7 +343,7 @@ function Ant_forest () {
         return
       }
       // 计时模式 超过最大循环次数 退出执行
-      if (_current_time > _config.max_collect_repeat) {
+      if (_current_time >= _config.max_collect_repeat) {
         _has_next = false
         logInfo("达到最大循环次数")
         return
@@ -490,6 +475,13 @@ function Ant_forest () {
         })
     } else {
       debugInfo('无能量球可收取')
+      if (_config.direct_use_img_collect_and_help) {
+        debugInfo('尝试通过图像分析收取能量')
+        _base_scanner.checkAndCollectByImg(true)
+      } else if (_config.try_collect_by_multi_touch) {
+        debugInfo('尝试通过直接点击区域收集能量')
+        _base_scanner.multiTouchToCollect()
+      }
     }
   }
 
@@ -573,9 +565,14 @@ function Ant_forest () {
       debugInfo('进入好友排行榜失败')
       return false
     }
+    let loadedStatus = _widgetUtils.ensureRankListLoaded(3)
+    if (!loadedStatus) {
+      warnInfo('排行榜加载中')
+      return false
+    }
     debugInfo('进入好友排行榜成功')
     if (true === findAndCollect()) {
-      _min_countdown = 0
+      _min_countdown = null
       _has_next = true
       _current_time = _current_time == 0 ? 0 : _current_time - 1
       errorInfo('收集好友能量失败，重新开始')
@@ -614,7 +611,7 @@ function Ant_forest () {
             warnInfo('关闭脚本', true)
             _commonFunctions.cancelAllTimedTasks()
           } else if (keyCode === 25) {
-            if (_config.autoSetBrightness) {
+            if (_config.auto_set_brightness) {
               device.setBrightnessMode(1)
             }
             warnInfo('延迟五分钟后启动脚本', true)
@@ -647,7 +644,7 @@ function Ant_forest () {
         debugInfo('重新锁定屏幕')
         automator.lockScreen()
       }
-      if (_config.autoSetBrightness) {
+      if (_config.auto_set_brightness) {
         device.setBrightnessMode(1)
       }
     }
@@ -733,6 +730,7 @@ function Ant_forest () {
     Executor.call(this)
 
     this.doInLoop = function () {
+      _min_countdown = null
       openAndWaitForPersonalHome()
       if (!_config.not_collect_self) {
         collectOwn()
@@ -743,7 +741,7 @@ function Ant_forest () {
           // 收集失败，重新开始
           _lost_someone = true
           _current_time = _current_time == 0 ? 0 : _current_time - 1
-          _min_countdown = 0
+          _min_countdown = null
           _has_next = true
           runSuccess = false
         }
@@ -776,7 +774,7 @@ function Ant_forest () {
             _commonFunctions.setUpAutoStart(_min_countdown - delayTime)
             _runningQueueDispatcher.removeRunningTask()
             // 如果不驻留悬浮窗  则不延迟，直接关闭
-            if (_config.notLingeringFloatWindow) {
+            if (_config.not_lingering_float_window) {
               _runningQueueDispatcher.removeRunningTask()
               exit()
             } else {
@@ -799,7 +797,7 @@ function Ant_forest () {
             errorInfo('发生异常 [' + e + '] [' + e.message + ']')
             _current_time = _current_time == 0 ? 0 : _current_time - 1
             _lost_someone = true
-            _min_countdown = 0
+            _min_countdown = null
             _has_next = true
             _re_try = 0
           }

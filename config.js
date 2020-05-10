@@ -2,7 +2,7 @@
  * @Author: TonyJiangWJ
  * @Date: 2019-12-09 20:42:08
  * @Last Modified by: TonyJiangWJ
- * @Last Modified time: 2020-05-01 12:08:13
+ * @Last Modified time: 2020-05-08 21:55:07
  * @Description: 
  */
 'ui';
@@ -17,7 +17,7 @@ let default_config = {
   color_offset: 20,
   // 是否显示状态栏的悬浮窗，避免遮挡，悬浮窗位置可以通过后两项配置修改 min_floaty_x[y]
   show_small_floaty: true,
-  notLingeringFloatWindow: false,
+  not_lingering_float_window: false,
   min_floaty_x: 150,
   min_floaty_y: 20,
   min_floaty_color: '#00ff00',
@@ -36,12 +36,17 @@ let default_config = {
   show_engine_id: false,
   develop_mode: false,
   // 开发用开关，截图并保存一些图片
+  // 保存倒计时图片
   cutAndSaveCountdown: false,
+  // 保存好友页面可收取和可帮助图片
+  cutAndSaveTreeCollect: false,
   auto_lock: false,
   lock_x: 150,
   lock_y: 970,
   // 是否根据当前锁屏状态来设置屏幕亮度，当锁屏状态下启动时 设置为最低亮度，结束后设置成自动亮度
-  autoSetBrightness: false,
+  auto_set_brightness: false,
+  // 锁屏启动关闭提示框
+  dismiss_dialog_if_locked: true,
   request_capture_permission: true,
   // 是否保存日志文件，如果设置为保存，则日志文件会按时间分片备份在logback/文件夹下
   saveLogFile: true,
@@ -57,7 +62,7 @@ let default_config = {
   // 基于图像分析时 在好友排行榜下拉的次数，因为无法辨别是否已经达到了最低点
   friendListScrollTime: 30,
   // 可收取小手指绿色像素点个数，1080P分辨率是这个数值，其他分辨率请自己修改
-  finger_img_pixels: 2300,
+  finger_img_pixels: 1900,
   thread_pool_size: 4,
   thread_pool_max_size: 8,
   thread_pool_queue_size: 16,
@@ -71,12 +76,6 @@ let default_config = {
   friendListStableCount: 3,
   // 滑动起始底部高度
   bottomHeight: 200,
-  // 虚拟按键的精确高度
-  virtualButtonHeight: 0,
-
-  // 好友列表跳过的间隙（和上一个点相比，小于这个距离的点会被丢弃）
-  friendsJunkGap: 110,
-
   // 是否使用模拟的滑动，如果滑动有问题开启这个 当前默认关闭 经常有人手机上有虚拟按键 然后又不看文档注释的
   useCustomScrollDown: true,
   // 排行榜列表下滑速度 200毫秒 不要太低否则滑动不生效 仅仅针对useCustomScrollDown=true的情况
@@ -122,14 +121,29 @@ let default_config = {
   do_watering_button_content: '送给\\s*TA|浇水送祝福',
   using_protect_content: '使用了保护罩',
   collectable_energy_ball_content: '收集能量\\d+克',
-  rank_check_left: 190,
-  rank_check_top: 230,
-  rank_check_width: 700,
-  rank_check_height: 135,
+  // 排行榜校验区域
+  rank_check_left: 250,
+  rank_check_top: 250,
+  rank_check_width: 550,
+  rank_check_height: 130,
+  // 收集能量球区域
+  tree_collect_left: 150,
+  tree_collect_top: 550,
+  tree_collect_width: 800,
+  tree_collect_height: 350,
+  // 底部校验区域
+  bottom_check_left: 600,
+  bottom_check_top: 2045,
+  bottom_check_width: 30,
+  bottom_check_height: 20,
+  bottom_check_gray_color: '#999999',
+  // 设备分辨率宽高
   device_width: device.width,
   device_height: device.height,
   // 尝试全局点击收集能量，能量球控件无法获取时使用 默认开启
-  try_collect_by_multi_touch: true
+  try_collect_by_multi_touch: false,
+  // 直接使用图像分析方式收取和帮助好友
+  direct_use_img_collect_and_help: true
 }
 let CONFIG_STORAGE_NAME = 'ant_forest_config_fork_version'
 let PROJECT_NAME = '蚂蚁森林能量收集'
@@ -148,9 +162,16 @@ if (typeof config.collectable_energy_ball_content !== 'string') {
 }
 
 if (!isRunningMode) {
-  if (config.device_height <= 10 || config.device_width <= 10) {
-    toastLog('请先运行config.js并输入设备宽高')
-    exit()
+  if (!currentEngine.endsWith('/config.js')) {
+    if (config.device_height <= 10 || config.device_width <= 10) {
+      toastLog('请先运行config.js并输入设备分辨率宽高')
+      exit()
+    }
+
+    if (config.checkBottomBaseImg && config.bottom_check_top > config.device_height) {
+      toastLog('请运行config.js 修改基于图像判断底部的范围')
+      exit()
+    }
   }
   module.exports = function (__runtime__, scope) {
     if (typeof scope.config_instance === 'undefined') {
@@ -180,30 +201,49 @@ if (!isRunningMode) {
   let countdownThread = null
   let loadingDialog = null
 
+  let colorRegex = /^#[\dabcdef]{6}$/i
+
   let _hasRootPermission = files.exists("/sbin/su") || files.exists("/system/xbin/su") || files.exists("/system/bin/su")
   let commonFunctions = require('./lib/prototype/CommonFunction.js')
   let AesUtil = require('./lib/AesUtil.js')
   // 初始化list 为全局变量
   let whiteList = [], wateringBlackList = [], helpBallColorList = []
-  let setScrollDownUiVal = function () {
+  let setImageBasedUiVal = function () {
     ui.friendListScrollTimeInpt.text(config.friendListScrollTime + '')
     ui.fingerImgPixelsInpt.text(config.finger_img_pixels + '')
-    ui.friendsJunkGap.text(config.friendsJunkGap + '')
     ui.checkBottomBaseImgChkBox.setChecked(config.checkBottomBaseImg)
     ui.baseOnImageContainer.setVisibility(config.base_on_image ? View.VISIBLE : View.GONE)
+    ui.rankCheckRegionInpt.text(config.rank_check_left + ',' + config.rank_check_top + ',' + config.rank_check_width + ',' + config.rank_check_height)
+
+    ui.tryCollectByMultiTouchChkBox.setChecked(config.try_collect_by_multi_touch)
+    ui.directUseImgCollectChkBox.setChecked(config.direct_use_img_collect_and_help)
+
+    ui.treeCollectRegionInpt.text(config.tree_collect_left + ',' + config.tree_collect_top + ',' + config.tree_collect_width + ',' + config.tree_collect_height)
+
+    if (config.direct_use_img_collect_and_help) {
+      ui.multiTouchContainer.setVisibility(View.GONE)
+      ui.collectRegionContainer.setVisibility(View.VISIBLE)
+      config.try_collect_by_multi_touch = false
+    } else {
+      ui.collectRegionContainer.setVisibility(View.GONE)
+      ui.multiTouchContainer.setVisibility(View.VISIBLE)
+    }
+
     ui.useOcrParentContainer.setVisibility(config.base_on_image ? View.VISIBLE : View.GONE)
     ui.friendListScrollTimeContainer.setVisibility(config.checkBottomBaseImg ? View.GONE : View.VISIBLE)
-    ui.virtualButtonContainer.setVisibility(!config.checkBottomBaseImg ? View.GONE : View.VISIBLE)
-    ui.virtualButtonHeightInpt.text(config.virtualButtonHeight + '')
-
-    ui.delayStartTimeInpt.text(config.delayStartTime + '')
-
+    ui.bottomCheckContainer.setVisibility(!config.checkBottomBaseImg ? View.GONE : View.VISIBLE)
+    ui.bottomCheckRegion.text(config.bottom_check_left + ',' + config.bottom_check_top + ',' + config.bottom_check_width + ',' + config.bottom_check_height)
+    ui.bottomCheckGrayColorInpt.text(config.bottom_check_gray_color)
+    if (colorRegex.test(config.bottom_check_gray_color)) {
+      ui.bottomCheckGrayColorInpt.setTextColor(colors.parseColor(config.bottom_check_gray_color))
+    }
 
     ui.useCustomScrollDownChkBox.setChecked(config.useCustomScrollDown)
     ui.scrollDownContainer.setVisibility(config.useCustomScrollDown ? View.VISIBLE : View.INVISIBLE)
     ui.bottomHeightContainer.setVisibility(config.useCustomScrollDown ? View.VISIBLE : View.GONE)
     ui.scrollDownSpeedInpt.text(config.scrollDownSpeed + '')
 
+    setWidgetOnlyVisiable()
   }
 
   let setOcrUiVal = function () {
@@ -221,7 +261,7 @@ if (!isRunningMode) {
 
   let inputDeviceSize = function () {
     return Promise.resolve().then(() => {
-      return dialogs.rawInput('请输入设备宽度：', config.device_width + '')
+      return dialogs.rawInput('请输入设备分辨率宽度：', config.device_width + '')
     }).then(x => {
       if (x) {
         let xVal = parseInt(x)
@@ -232,7 +272,7 @@ if (!isRunningMode) {
         }
       }
     }).then(() => {
-      return dialogs.rawInput('请输入设备高度：', config.device_height + '')
+      return dialogs.rawInput('请输入设备分辨率高度：', config.device_height + '')
     }).then(y => {
       if (y) {
         let yVal = parseInt(y)
@@ -261,7 +301,15 @@ if (!isRunningMode) {
     ui.blueSeekbar.setProgress(parseInt(rgbColors.blue / 255 * 100))
   }
 
-  let resetUiValues = function () {
+  let setWidgetOnlyVisiable = function () {
+    if (config.base_on_image && !config.auto_set_img_or_widget) {
+      ui.baseOnWidgetOnlyContainer.setVisibility(View.GONE)
+    } else {
+      ui.baseOnWidgetOnlyContainer.setVisibility(View.VISIBLE)
+    }
+  }
+
+  let setBasicUiValues = function () {
     config.device_width = config.device_width > 0 ? config.device_width : 1
     config.device_height = config.device_height > 0 ? config.device_height : 1
     // 重置为默认
@@ -291,7 +339,7 @@ if (!isRunningMode) {
     ui.colorSelectorContainer.setVisibility(View.GONE)
     setColorSeekBar()
 
-    ui.notLingeringFloatWindowChkBox.setChecked(config.notLingeringFloatWindow)
+    ui.notLingeringFloatWindowChkBox.setChecked(config.not_lingering_float_window)
     ui.helpFriendChkBox.setChecked(config.help_friend)
 
     ui.isCycleChkBox.setChecked(config.is_cycle)
@@ -305,11 +353,14 @@ if (!isRunningMode) {
     ui.reactiveTimeContainer.setVisibility(config.never_stop ? View.VISIBLE : View.INVISIBLE)
     ui.reactiveTimeInpt.text(config.reactive_time + '')
 
+    ui.delayStartTimeInpt.text(config.delayStartTime + '')
+
     ui.showDebugLogChkBox.setChecked(config.show_debug_log)
     ui.saveLogFileChkBox.setChecked(config.saveLogFile)
     ui.showEngineIdChkBox.setChecked(config.show_engine_id)
     ui.developModeChkBox.setChecked(config.develop_mode)
     ui.cutAndSaveCountdownChkBox.setChecked(config.cutAndSaveCountdown)
+    ui.cutAndSaveTreeCollectChkBox.setChecked(config.cutAndSaveTreeCollect)
     ui.developModeContainer.setVisibility(config.develop_mode ? View.VISIBLE : View.GONE)
     ui.fileSizeInpt.text(config.back_size + '')
     ui.fileSizeContainer.setVisibility(config.saveLogFile ? View.VISIBLE : View.INVISIBLE)
@@ -324,14 +375,18 @@ if (!isRunningMode) {
     ui.lockPositionContainer.setVisibility(config.auto_lock && !_hasRootPermission ? View.VISIBLE : View.INVISIBLE)
     ui.lockDescNoRoot.setVisibility(!_hasRootPermission ? View.VISIBLE : View.INVISIBLE)
 
-    ui.autoSetBrightnessChkBox.setChecked(config.autoSetBrightness)
+    ui.autoSetBrightnessChkBox.setChecked(config.auto_set_brightness)
+    ui.dismissDialogIfLockedChkBox.setChecked(config.dismiss_dialog_if_locked)
 
     ui.timeoutUnlockInpt.text(config.timeout_unlock + '')
     ui.timeoutFindOneInpt.text(config.timeout_findOne + '')
     ui.timeoutExistingInpt.text(config.timeout_existing + '')
     ui.captureWaitingTimeInpt.text(config.capture_waiting_time + '')
 
-    // 进阶配置
+    setDeviceSizeText()
+  }
+
+  let setAdvanceUiValues = function () {
     ui.singleScriptChkBox.setChecked(config.single_script)
     ui.collectSelfOnlyChkBox.setChecked(config.collect_self_only)
     ui.notCollectSelfChkBox.setChecked(config.not_collect_self)
@@ -355,11 +410,11 @@ if (!isRunningMode) {
     ui.wateringBlackListContainer.setVisibility(config.wateringBack ? View.VISIBLE : View.GONE)
     ui.wateringBackAmountSpinner.setSelection([5, 10, 18].indexOf(config.targetWateringAmount))
 
-    ui.tryCollectByMultiTouchChkBox.setChecked(config.try_collect_by_multi_touch)
-    setScrollDownUiVal()
+    setImageBasedUiVal()
     setOcrUiVal()
+  }
 
-    // 控件文本配置
+  let setWidgetUiValues = function () {
     ui.homeUiContentInpt.text(config.home_ui_content)
     ui.friendHomeUiContentInpt.text(config.friend_home_ui_content)
     ui.friendListIdInpt.text(config.friend_list_id)
@@ -369,9 +424,6 @@ if (!isRunningMode) {
     ui.wateringWidgetContentInpt.text(config.watering_widget_content)
     ui.doWateringWidgetContentInpt.text(config.do_watering_button_content)
     ui.usingProtectContentInpt.text(config.using_protect_content)
-    ui.rankCheckRegion.text(config.rank_check_left + ',' + config.rank_check_top + ',' + config.rank_check_width + ',' + config.rank_check_height)
-
-    let colorRegex = /^#[\dabcdef]{6}$/i
     let collectColor = config.can_collect_color
     ui.canCollectColorInpt.text(collectColor)
     if (colorRegex.test(collectColor)) {
@@ -384,8 +436,10 @@ if (!isRunningMode) {
     }
 
     ui.collectableEnergyBallContentInpt.text(config.collectable_energy_ball_content)
+  }
 
-    // 列表绑定
+  let bindListValues = function () {
+    // 白名单
     if (config.white_list && config.white_list.length > 0) {
       whiteList = config.white_list.map(r => {
         return { name: r }
@@ -393,6 +447,7 @@ if (!isRunningMode) {
     }
     ui.whiteList.setDataSource(whiteList)
 
+    // 黑名单
     if (config.wateringBlackList && config.wateringBlackList.length > 0) {
       wateringBlackList = config.wateringBlackList.map(r => {
         return { name: r }
@@ -400,14 +455,27 @@ if (!isRunningMode) {
     }
     ui.blackList.setDataSource(wateringBlackList)
 
+    // 可帮助收取能量球颜色
     if (config.helpBallColors && config.helpBallColors.length > 0) {
       helpBallColorList = config.helpBallColors.map(r => {
         return { color: r }
       })
     }
     ui.helpBallColorsList.setDataSource(helpBallColorList)
+  }
 
-    setDeviceSizeText()
+  /**
+   * 刷新所有的配置信息
+   */
+  let resetUiValues = function () {
+    // 基本配置
+    setBasicUiValues()
+    // 进阶配置
+    setAdvanceUiValues()
+    // 控件文本配置
+    setWidgetUiValues()
+    // 列表绑定
+    bindListValues()
   }
 
   threads.start(function () {
@@ -439,14 +507,13 @@ if (!isRunningMode) {
       onItemSelected: function (parentView, selectedItemView, position, id) {
         selectedCallback(position)
       },
-      onNothingSelected: function (parentView) {}
+      onNothingSelected: function (parentView) { }
     })
   }
 
   setTimeout(function () {
     let start = new Date().getTime()
     ui.layout(
-
       <drawer>
         <vertical>
           <appbar>
@@ -559,8 +626,9 @@ if (!isRunningMode) {
                   </horizontal>
                   <checkbox id="developModeChkBox" text="是否启用开发模式" />
                   <vertical id="developModeContainer" gravity="center">
-                    <text text="脚本执行时保存图片，未启用开发模式时依旧有效:" margin="5 0" textSize="14sp"/>
-                    <checkbox id="cutAndSaveCountdownChkBox" text="是否保存开发用的图片" />
+                    <text text="脚本执行时保存图片，未启用开发模式时依旧有效:" margin="5 0" textSize="14sp" />
+                    <checkbox id="cutAndSaveCountdownChkBox" text="是否保存倒计时图片" />
+                    <checkbox id="cutAndSaveTreeCollectChkBox" text="是否保存可收取能量球图片" />
                   </vertical>
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                   {/* 是否显示debug日志 */}
@@ -600,6 +668,8 @@ if (!isRunningMode) {
                   </horizontal>
                   {/* 是否自动设置最低亮度 */}
                   <checkbox id="autoSetBrightnessChkBox" text="锁屏启动设置最低亮度" />
+                  {/* 是否锁屏启动关闭弹框提示 */}
+                  <checkbox id="dismissDialogIfLockedChkBox" text="锁屏启动关闭弹框提示" />
                   {/* 基本不需要修改的 */}
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                   <horizontal gravity="center">
@@ -631,40 +701,6 @@ if (!isRunningMode) {
                   <checkbox id="collectSelfOnlyChkBox" text="只收自己的能量" />
                   <checkbox id="notCollectSelfChkBox" text="不收自己的能量" />
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
-                  {/* 基于图像分析 */}
-                  <checkbox id="autoSetImgOrWidgetChkBox" text="自动判断基于图像还是控件分析" />
-                  <text text="当可收取能量球控件无法获取时开启区域点击，后期会开发基于图像分析的方式" textSize="9sp" />
-                  <checkbox id="tryCollectByMultiTouchChkBox" text="是否尝试区域点击来收取能量" />
-                  <checkbox id="baseOnImageChkBox" text="基于图像分析" />
-                  <vertical id="baseOnImageContainer">
-                    <checkbox id="checkBottomBaseImgChkBox" text="基于图像判断列表底部" />
-                    <vertical id="virtualButtonContainer">
-                      <text text="系统底部虚拟按键的精确高度，全面屏设置为0即可，含虚拟按键的必须填写真实高度 否则判断有误" textSize="10sp" />
-                      <horizontal gravity="center" >
-                        <text text="虚拟按键精确高度:" />
-                        <input layout_weight="70" inputType="number" id="virtualButtonHeightInpt" />
-                      </horizontal>
-                    </vertical>
-                    {/* 排行榜中下拉次数 */}
-                    <vertical id="friendListScrollTimeContainer">
-                      <text text="排行榜下拉的最大次数，使得所有数据都加载完，如果基于图像拍短无效只能如此" textSize="10sp" />
-                      <horizontal gravity="center" >
-                        <text text="排行榜下拉次数:" />
-                        <input layout_weight="70" inputType="number" id="friendListScrollTimeInpt" layout_weight="70" />
-                      </horizontal>
-                    </vertical>
-                    <text text="可收取小手指的绿色像素点个数，1080P时小于2300判定为可收取，其他分辨率需要自行修改=2300*缩放比例^2" textSize="10sp" />
-                    <text text="如果还是不行，请分析日志进行调整，日志中会打印同色点个数" textSize="10sp" />
-                    <horizontal gravity="center" >
-                      <text text="小手指像素点个数:" />
-                      <input layout_weight="70" inputType="number" id="fingerImgPixelsInpt" layout_weight="70" />
-                    </horizontal>
-                    <horizontal gravity="center" >
-                      <text text="好友列表跳过的间隙:" />
-                      <input layout_weight="70" inputType="number" id="friendsJunkGap" layout_weight="70" />
-                    </horizontal>
-                  </vertical>
-
                   {/* 使用模拟手势来实现上下滑动 */}
                   <horizontal gravity="center">
                     <checkbox id="useCustomScrollDownChkBox" text="是否启用模拟滑动" layout_weight="40" />
@@ -679,19 +715,50 @@ if (!isRunningMode) {
                     <input layout_weight="70" inputType="number" id="bottomHeightInpt" />
                   </horizontal>
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
-                  {/* 是否启用百度的OCR */}
-                  <vertical id="useOcrParentContainer">
-                    <checkbox id="useOcrChkBox" text="是否启用百度的OCR识别倒计时" />
-                    <vertical id="useOcrContainer">
-                      <text text="缓存数据仅仅是像素点个数和倒计时的键值对，所以可能返回的是错误的值" textSize="10sp" />
-                      <checkbox id="ocrUseCacheChkBox" text="是否从缓存中获取OCR识别的倒计时，非精确值" />
-                      <checkbox id="saveBase64ImgInfoChkBox" text="是否记录图片Base64数据到日志" />
-                      <text id="ocrInvokeCount" textSize="12sp" />
-                      <text text="需要识别的倒计时绿色像素点数量，像素点越多倒计时数值越小，此时调用接口可以节省调用次数" textSize="10sp" />
-                      <input inputType="number" id="ocrThresholdInpt" w="*" />
-                      <text text="百度AI平台申请到的ApiKey和SecretKey" />
-                      <input id="apiKeyInpt" hint="apiKey" />
-                      <input id="secretKeyInpt" inputType="textPassword" hint="apiKey" />
+                  <checkbox id="directUseImgCollectChkBox" text="是否直接基于图像分析收取和帮助好友" />
+                  <horizontal gravity="center" id="collectRegionContainer">
+                    <text text="基于图像收集能量球范围:" layout_weight="20" />
+                    <input inputType="text" id="treeCollectRegionInpt" layout_weight="80" />
+                  </horizontal>
+                  <vertical id="multiTouchContainer">
+                    <text text="当可收取能量球控件无法获取时开启区域点击, 不同设备请扩展点击代码，当前建议开启 直接基于图像分析收取和帮助好友" textSize="9sp" />
+                    <checkbox id="tryCollectByMultiTouchChkBox" text="是否尝试区域点击来收取能量" />
+                  </vertical>
+                  <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
+                  {/* 基于图像分析 */}
+                  <checkbox id="autoSetImgOrWidgetChkBox" text="自动判断基于图像还是控件分析" />
+                  <checkbox id="baseOnImageChkBox" text="基于图像分析" />
+                  <vertical id="baseOnImageContainer">
+                    <text text="通过运行 util/悬浮窗框位置.js 可以获取对应位置信息" />
+                    <horizontal gravity="center">
+                      <text text="校验排行榜分析范围:" layout_weight="20" />
+                      <input inputType="text" id="rankCheckRegionInpt" layout_weight="80" />
+                    </horizontal>
+                    <text text="可收取小手指的绿色像素点个数，颜色相似度20，1080P时小于1900判定为可收取，其他分辨率需要自行修改=1900*缩放比例^2" textSize="10sp" />
+                    <text text="如果还是不行，请分析日志进行调整，日志中会打印同色点个数" textSize="10sp" />
+                    <horizontal gravity="center" >
+                      <text text="小手指像素点个数:" />
+                      <input layout_weight="70" inputType="number" id="fingerImgPixelsInpt" layout_weight="70" />
+                    </horizontal>
+                    <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
+                    <checkbox id="checkBottomBaseImgChkBox" text="基于图像判断列表底部" />
+                    <vertical id="bottomCheckContainer">
+                      <horizontal gravity="center">
+                        <text text="基于图像判断底部的范围:" layout_weight="20" />
+                        <input inputType="text" id="bottomCheckRegion" layout_weight="80" />
+                      </horizontal>
+                      <horizontal gravity="center">
+                        <text text="底部判断的灰度颜色值:" layout_weight="20" />
+                        <input inputType="text" id="bottomCheckGrayColorInpt" layout_weight="80" />
+                      </horizontal>
+                    </vertical>
+                    {/* 排行榜中下拉次数 当关闭基于图像判断底部时生效 */}
+                    <vertical id="friendListScrollTimeContainer">
+                      <text text="排行榜下拉的最大次数，使得所有数据都加载完，如果基于图像拍短无效只能如此" textSize="10sp" />
+                      <horizontal gravity="center" >
+                        <text text="排行榜下拉次数:" />
+                        <input layout_weight="70" inputType="number" id="friendListScrollTimeInpt" layout_weight="70" />
+                      </horizontal>
                     </vertical>
                     <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                     {/* 线程池配置 */}
@@ -712,6 +779,22 @@ if (!isRunningMode) {
                       <text text="线程池等待时间（秒）" layout_weight="20" />
                       <input layout_weight="60" inputType="number" id="threadPoolWaitingTimeInpt" />
                     </horizontal>
+                  </vertical>
+                  <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
+                  {/* 是否启用百度的OCR */}
+                  <vertical id="useOcrParentContainer">
+                    <checkbox id="useOcrChkBox" text="是否启用百度的OCR识别倒计时" />
+                    <vertical id="useOcrContainer">
+                      <text text="缓存数据仅仅是像素点个数和倒计时的键值对，所以可能返回的是错误的值" textSize="10sp" />
+                      <checkbox id="ocrUseCacheChkBox" text="是否从缓存中获取OCR识别的倒计时，非精确值" />
+                      <checkbox id="saveBase64ImgInfoChkBox" text="是否记录图片Base64数据到日志" />
+                      <text id="ocrInvokeCount" textSize="12sp" />
+                      <text text="需要识别的倒计时绿色像素点数量，像素点越多倒计时数值越小，此时调用接口可以节省调用次数" textSize="10sp" />
+                      <input inputType="number" id="ocrThresholdInpt" w="*" />
+                      <text text="百度AI平台申请到的ApiKey和SecretKey" />
+                      <input id="apiKeyInpt" hint="apiKey" />
+                      <input id="secretKeyInpt" inputType="textPassword" hint="apiKey" />
+                    </vertical>
                   </vertical>
                   <horizontal w="*" h="1sp" bg="#cccccc" margin="5 0"></horizontal>
                   {/* 收取白名单列表 */}
@@ -737,8 +820,8 @@ if (!isRunningMode) {
                       <text text="浇水阈值" />
                       <input layout_weight="70" inputType="number" id="wateringThresholdInpt" />
                     </horizontal>
-                    <text text = "浇水数量" textSize="14sp" />
-                    <spinner id="wateringBackAmountSpinner" entries="5|10|18"/>
+                    <text text="浇水数量" textSize="14sp" />
+                    <spinner id="wateringBackAmountSpinner" entries="5|10|18" />
                   </horizontal>
                   {/* 浇水黑名单 */}
                   <vertical w="*" gravity="left" layout_gravity="left" margin="10" id="wateringBlackListContainer">
@@ -759,7 +842,7 @@ if (!isRunningMode) {
               </ScrollView>
             </frame>
             <frame>
-              <ScrollView>
+              <ScrollView id="parentScrollView3">
                 <vertical padding="12 24">
                   <text text="一般情况下不需要修改这一块的配置，除非你的支付宝是英文的" textSize="12sp" />
                   <horizontal gravity="center">
@@ -771,20 +854,8 @@ if (!isRunningMode) {
                     <input inputType="text" id="friendHomeUiContentInpt" layout_weight="80" />
                   </horizontal>
                   <horizontal gravity="center">
-                    <text text="好友排行榜id:" layout_weight="20" />
-                    <input inputType="text" id="friendListIdInpt" layout_weight="80" />
-                  </horizontal>
-                  <horizontal gravity="center">
                     <text text="查看更多好友按钮:" layout_weight="20" />
                     <input inputType="text" id="enterFriendListUiContentInpt" layout_weight="80" />
-                  </horizontal>
-                  <horizontal gravity="center">
-                    <text text="没有更多按钮:" layout_weight="20" />
-                    <input inputType="text" id="noMoreUiContentInpt" layout_weight="80" />
-                  </horizontal>
-                  <horizontal gravity="center">
-                    <text text="查看更多按钮:" layout_weight="20" />
-                    <input inputType="text" id="loadMoreUiContentInpt" layout_weight="80" />
                   </horizontal>
                   <horizontal gravity="center">
                     <text text="浇水:" layout_weight="20" />
@@ -798,15 +869,24 @@ if (!isRunningMode) {
                     <text text="保护罩:" layout_weight="20" />
                     <input inputType="text" id="usingProtectContentInpt" layout_weight="80" />
                   </horizontal>
-                  <text text="通过运行 util/悬浮窗框位置.js 可以获取对应位置信息" />
-                  <horizontal gravity="center">
-                    <text text="校验排行榜分析范围:" layout_weight="20" />
-                    <input inputType="text" id="rankCheckRegion" layout_weight="80" />
-                  </horizontal>
                   <horizontal gravity="center">
                     <text text="可收集能量球:" layout_weight="20" />
                     <input inputType="text" id="collectableEnergyBallContentInpt" layout_weight="80" />
                   </horizontal>
+                  <vertical id="baseOnWidgetOnlyContainer">
+                    <horizontal gravity="center">
+                      <text text="好友排行榜id:" layout_weight="20" />
+                      <input inputType="text" id="friendListIdInpt" layout_weight="80" />
+                    </horizontal>
+                    <horizontal gravity="center">
+                      <text text="没有更多按钮:" layout_weight="20" />
+                      <input inputType="text" id="noMoreUiContentInpt" layout_weight="80" />
+                    </horizontal>
+                    <horizontal gravity="center">
+                      <text text="查看更多按钮:" layout_weight="20" />
+                      <input inputType="text" id="loadMoreUiContentInpt" layout_weight="80" />
+                    </horizontal>
+                  </vertical>
                   <horizontal gravity="center">
                     <text text="列表中可收取的颜色:" layout_weight="20" />
                     <input inputType="text" id="canCollectColorInpt" layout_weight="80" />
@@ -818,16 +898,14 @@ if (!isRunningMode) {
                   <vertical w="*" gravity="left" layout_gravity="left" margin="10">
                     <text text="帮收取能量球颜色" textColor="#666666" textSize="14sp" />
                     <frame>
-                      <ScrollView height="100">
-                        <list id="helpBallColorsList">
-                          <horizontal w="*" h="40" gravity="left" bg="#efefef" margin="0 5">
-                            <text id="name" layout_weight='1' h="30" gravity="left|center" layout_gravity="left|center" textSize="16sp" textColor="{{color}}" text="{{color}}" margin="10 0" />
-                            <card id="deleteHelpColor" w="30" h="30" cardBackgroundColor="#fafafa" cardCornerRadius="15dp" layout_gravity="center" marginRight="10">
-                              <text textSize="16dp" textColor="#555555" gravity="center">×</text>
-                            </card>
-                          </horizontal>
-                        </list>
-                      </ScrollView>
+                      <list id="helpBallColorsList" height="150">
+                        <horizontal w="*" h="40" gravity="left" bg="#efefef" margin="0 5">
+                          <text id="name" layout_weight='1' h="30" gravity="left|center" layout_gravity="left|center" textSize="16sp" textColor="{{color}}" text="{{color}}" margin="10 0" />
+                          <card id="deleteHelpColor" w="30" h="30" cardBackgroundColor="#fafafa" cardCornerRadius="15dp" layout_gravity="center" marginRight="10">
+                            <text textSize="16dp" textColor="#555555" gravity="center">×</text>
+                          </card>
+                        </horizontal>
+                      </list>
                     </frame>
                     <button w="*" id="addHelpBallColor" text="添加" gravity="center" layout_gravity="center" />
                   </vertical>
@@ -1076,6 +1154,18 @@ if (!isRunningMode) {
       })
     })
 
+    ui.helpBallColorsList.setOnTouchListener(new View.OnTouchListener({
+      onTouch: function (v, event) {
+        if (event.getAction() == MotionEvent.ACTION_UP) {
+          ui.parentScrollView3.requestDisallowInterceptTouchEvent(false)
+        } else {
+          // 屏蔽父控件的拦截事件
+          ui.parentScrollView3.requestDisallowInterceptTouchEvent(true)
+        }
+        return false
+      }
+    }))
+
     ui.addHelpBallColor.on('click', () => {
       dialogs.rawInput('请输入颜色')
         .then(color => {
@@ -1295,7 +1385,7 @@ if (!isRunningMode) {
     })
 
     ui.notLingeringFloatWindowChkBox.on('click', () => {
-      config.notLingeringFloatWindow = ui.notLingeringFloatWindowChkBox.isChecked()
+      config.not_lingering_float_window = ui.notLingeringFloatWindowChkBox.isChecked()
     })
 
     ui.isCycleChkBox.on('click', () => {
@@ -1328,6 +1418,10 @@ if (!isRunningMode) {
       config.cutAndSaveCountdown = ui.cutAndSaveCountdownChkBox.isChecked()
     })
 
+    ui.cutAndSaveTreeCollectChkBox.on('click', () => {
+      config.cutAndSaveTreeCollect = ui.cutAndSaveTreeCollectChkBox.isChecked()
+    })
+
     ui.saveLogFileChkBox.on('click', () => {
       config.saveLogFile = ui.saveLogFileChkBox.isChecked()
       ui.fileSizeContainer.setVisibility(config.saveLogFile ? View.VISIBLE : View.INVISIBLE)
@@ -1338,7 +1432,11 @@ if (!isRunningMode) {
     })
 
     ui.autoSetBrightnessChkBox.on('click', () => {
-      config.autoSetBrightness = ui.autoSetBrightnessChkBox.isChecked()
+      config.auto_set_brightness = ui.autoSetBrightnessChkBox.isChecked()
+    })
+
+    ui.dismissDialogIfLockedChkBox.on('click', () => {
+      config.dismiss_dialog_if_locked = ui.dismissDialogIfLockedChkBox.isChecked()
     })
 
     ui.autoLockChkBox.on('click', () => {
@@ -1465,11 +1563,23 @@ if (!isRunningMode) {
         ui.baseOnImageChkBox.setChecked(true)
         config.useCustomScrollDown = true
       }
-      setScrollDownUiVal()
+      setImageBasedUiVal()
     })
 
     ui.tryCollectByMultiTouchChkBox.on('click', () => {
       config.try_collect_by_multi_touch = ui.tryCollectByMultiTouchChkBox.isChecked()
+    })
+    ui.directUseImgCollectChkBox.on('click', () => {
+      config.direct_use_img_collect_and_help = ui.directUseImgCollectChkBox.isChecked()
+      if (config.direct_use_img_collect_and_help) {
+        ui.multiTouchContainer.setVisibility(View.GONE)
+        ui.collectRegionContainer.setVisibility(View.VISIBLE)
+        config.try_collect_by_multi_touch = false
+      } else {
+        ui.multiTouchContainer.setVisibility(View.VISIBLE)
+        ui.collectRegionContainer.setVisibility(View.GONE)
+        ui.tryCollectByMultiTouchChkBox.setChecked(config.try_collect_by_multi_touch)
+      }
     })
 
     ui.baseOnImageChkBox.on('click', () => {
@@ -1477,11 +1587,13 @@ if (!isRunningMode) {
       if (config.base_on_image) {
         config.useCustomScrollDown = true
       }
-      setScrollDownUiVal()
+      setImageBasedUiVal()
     })
+
     ui.checkBottomBaseImgChkBox.on('click', () => {
       config.checkBottomBaseImg = ui.checkBottomBaseImgChkBox.isChecked()
-      setScrollDownUiVal()
+      ui.friendListScrollTimeContainer.setVisibility(config.checkBottomBaseImg ? View.GONE : View.VISIBLE)
+      ui.bottomCheckContainer.setVisibility(!config.checkBottomBaseImg ? View.GONE : View.VISIBLE)
     })
 
     ui.useCustomScrollDownChkBox.on('click', () => {
@@ -1508,10 +1620,6 @@ if (!isRunningMode) {
 
     ui.threadPoolWaitingTimeInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.thread_pool_waiting_time = parseInt(text) })
-    )
-
-    ui.virtualButtonHeightInpt.addTextChangedListener(
-      TextWatcherBuilder(text => { config.virtualButtonHeight = parseInt(text) })
     )
 
     ui.scrollDownSpeedInpt.addTextChangedListener(
@@ -1562,10 +1670,6 @@ if (!isRunningMode) {
     ui.fingerImgPixelsInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.finger_img_pixels = parseInt(text) })
     )
-    ui.friendsJunkGap.addTextChangedListener(
-      TextWatcherBuilder(text => { config.friendsJunkGap = parseInt(text) })
-    )
-
     ui.delayStartTimeInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.delayStartTime = parseInt(text) })
     )
@@ -1597,7 +1701,7 @@ if (!isRunningMode) {
     ui.usingProtectContentInpt.addTextChangedListener(
       TextWatcherBuilder(text => { config.using_protect_content = text + '' })
     )
-    ui.rankCheckRegion.addTextChangedListener(
+    ui.rankCheckRegionInpt.addTextChangedListener(
       TextWatcherBuilder(text => {
         let newVal = text + ''
         let regex = /^(\d+)\s*,(\d+)\s*,(\d+)\s*,(\d+)\s*$/
@@ -1612,6 +1716,53 @@ if (!isRunningMode) {
         }
       })
     )
+    ui.treeCollectRegionInpt.addTextChangedListener(
+      TextWatcherBuilder(text => {
+        let newVal = text + ''
+        let regex = /^(\d+)\s*,(\d+)\s*,(\d+)\s*,(\d+)\s*$/
+        if (regex.test(newVal)) {
+          let match = regex.exec(newVal)
+          config.tree_collect_left = parseInt(match[1])
+          config.tree_collect_top = parseInt(match[2])
+          config.tree_collect_width = parseInt(match[3])
+          config.tree_collect_height = parseInt(match[4])
+        } else {
+          toast('输入值无效')
+        }
+      })
+    )
+
+    ui.bottomCheckRegion.addTextChangedListener(
+      TextWatcherBuilder(text => {
+        let newVal = text + ''
+        let regex = /^(\d+)\s*,(\d+)\s*,(\d+)\s*,(\d+)\s*$/
+        if (regex.test(newVal)) {
+          let match = regex.exec(newVal)
+          config.bottom_check_left = parseInt(match[1])
+          config.bottom_check_top = parseInt(match[2])
+          config.bottom_check_width = parseInt(match[3])
+          config.bottom_check_height = parseInt(match[4])
+        } else {
+          toast('输入值无效')
+        }
+      })
+    )
+
+    ui.bottomCheckGrayColorInpt.addTextChangedListener(
+      TextWatcherBuilder(text => {
+        let val = text + ''
+        if (val) {
+          val = val.trim()
+        }
+        if (/^#[\dabcdef]{6}$/i.test(val)) {
+          ui.bottomCheckGrayColorInpt.setTextColor(colors.parseColor(val))
+          config.bottom_check_gray_color = val
+        } else {
+          toast('颜色值无效，请重新输入')
+        }
+      })
+    )
+
     ui.canCollectColorInpt.addTextChangedListener(
       TextWatcherBuilder(text => {
         let val = text + ''
@@ -1650,8 +1801,8 @@ if (!isRunningMode) {
       if (loadingDialog !== null) {
         loadingDialog.dismiss()
       }
-    }, 500)
-  }, 500)
+    }, 800)
+  }, 800)
 
   ui.emitter.on('pause', () => {
     let isBlank = function (val) {
